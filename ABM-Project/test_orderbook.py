@@ -7,7 +7,7 @@ narrowing/widening on trades, market order matching, cancellation, and the
 edge case of an empty opposite book.
 """
 
-from orderbook import OrderBook, Side
+from orderbook import OrderBook, Side, OrderResult
 
 
 def check(label, condition):
@@ -96,6 +96,21 @@ def test_best_price_walks_correctly_after_level_exhausted():
     check("best ask starts at 101", ob.best_ask() == 101)
     ob.submit_market_order(Side.BID, timestamp=2, agent_id="taker1")
     check("best ask now 102 after 101 consumed", ob.best_ask() == 102)
+
+
+def test_market_order_reports_execution_result():
+    ob = OrderBook()
+    ob.submit_limit_order(Side.ASK, price=101, timestamp=1, agent_id="maker")
+
+    #Other side has liquidity --> should report EXECUTED
+    result, order_id = ob.submit_market_order(Side.BID, timestamp=2, agent_id="taker")
+    check("a trade was actually recorded", len(ob.trades) == 1)
+
+    #Opposite side (asks) now empty --> should report NO_MATCH, not just pass.
+    result2, order_id2 = ob.submit_market_order(Side.BID, timestamp=3, agent_id="taker2")
+    check("market order against empty book reports NO_MATCH", result2 is OrderResult.NO_MATCH)
+    check("no additional trade recorded on failed market order", len(ob.trades) == 1)
+    check("order_id is still returned even on failure (for logging)", order_id2 is not None)
 
 
 def test_depth_profile_and_total_orders():

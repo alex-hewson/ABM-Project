@@ -22,6 +22,16 @@ class Side(Enum):
     BID = 1   # buy
     ASK = -1  # sell
 
+class OrderResult(Enum):
+    '''
+    Outcome of attempted match (for either market order or limit order)
+    EXECUTED means a trade happened (obvs!)
+    NO_MATCH means for limit order, there is no crossing, so just rests in the book
+             for a market order means there is no liquidity (not good!)
+    '''
+    EXECUTED = 1
+    NO_MATCH = 2
+
 
 @dataclass
 class Order:
@@ -44,6 +54,10 @@ class Trade:
     resting_agent_id: Optional[int]
     aggressor_agent_id: Optional[int]
 
+@dataclass
+class MatchResult:
+    result: OrderResult
+    has_remainder: bool
 
 class OrderBook:
     """
@@ -145,31 +159,30 @@ class OrderBook:
         order fully executed and the id is now just a historical reference).
         """
         order_id = self.next_order_id()
-        remaining = self._match_incoming(
+        match = self._match_incoming(
             side=side, price=price, timestamp=timestamp,
             agent_id=agent_id, order_id=order_id, is_market_order=False,
         )
-        if remaining:
+        if match.has_remainder:
             self._rest_order(Order(order_id, side, price, timestamp, agent_id))
         return order_id
 
     def submit_market_order(
         self, side: Side, timestamp: int, agent_id: Optional[int] = None
-    ) -> int:
+    ) -> tuple[OrderResult, int]:
         """
         Submit a market order. Executes immediately against the best
         available opposite-side price(s). If the book on the opposite side
-        is empty, the order simply cannot execute (dropped) -- this
-        situation should be rare/impossible if book depth is managed
-        correctly (see the paper's Eq. 1-3 stability condition), but we
-        handle it gracefully rather than raising.
+        is empty, the order fails to execute, and is reported back via OrderResult.
+
+        Returns (OrderResult, order_id). order_id is still returned on failure (more data).
         """
         order_id = self.next_order_id()
-        self._match_incoming(
+        match = self._match_incoming(
             side=side, price=None, timestamp=timestamp,
             agent_id=agent_id, order_id=order_id, is_market_order=True,
         )
-        return order_id
+        return match.result, order_id
 
     def _rest_order(self, order: Order) -> None:
         book = self.bids if order.side is Side.BID else self.asks
@@ -192,7 +205,7 @@ class OrderBook:
         agent_id: Optional[int],
         order_id: int,
         is_market_order: bool,
-    ) -> bool:
+    ) -> "MatchResult":
         """
         Attempt to match an incoming order (market or marketable limit)
         against the opposite side of the book, walking through price
@@ -200,9 +213,10 @@ class OrderBook:
         larger orders would show up, though this base model uses unit
         order size so at most one resting order is consumed).
 
-        Returns True if there is remaining unmatched quantity (only
-        possible for limit orders -- market orders either fully execute
-        or are dropped if the book is empty).
+        Returns MatchResult with:
+            result: OrderResult.EXECUTED if a trade happened
+                    OrderResult.NO_MATCH otherwise
+            has_remainder: True if there is any unmatched quantity that needs to rest in the orderbook (omly limit orders)
         """
         opposite_book = self.asks if side is Side.BID else self.bids
 
@@ -211,7 +225,7 @@ class OrderBook:
             if best_opposite is None:
                 # opposite side of book is empty -- market order can't fill,
                 # limit order has nothing to match against
-                return not is_market_order
+                return MatchResult(OrderResult.NO_MATCH, has_remainder= not is_market_order)
 
             if is_market_order:
                 crosses = True
@@ -219,7 +233,7 @@ class OrderBook:
                 crosses = (price >= best_opposite) if side is Side.BID else (price <= best_opposite)
 
             if not crosses:
-                return True  # unmatched remainder rests in book
+                return MatchResult(OrderResult.NO_MATCH, has_remainder=True)  # unmatched remainder rests in book
 
             queue = opposite_book[best_opposite]
             resting_order = queue[0]  # time priority: oldest order at this price
@@ -239,7 +253,7 @@ class OrderBook:
 
             # Unit order size in this base model: incoming order is now
             # fully filled after consuming exactly one resting order.
-            return False
+            return MatchResult(OrderResult.EXECUTED, has_remainder=False)
 
     def _execute_trade(
         self, timestamp: int, price: int, aggressor_side: Side,

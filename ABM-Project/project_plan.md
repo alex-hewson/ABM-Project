@@ -9,10 +9,42 @@
 - Implemented and tested the core `OrderBook` matching engine in Python
   (price-time priority, limit/market orders, cancellation, lazy-deletion
   heaps for best bid/ask)
-- Verified performance is adequate for paper-scale simulations (~18s
-  estimated per 10⁶-step run before agent overhead)
+- Verified performance is adequate for the order book alone (~18s estimated per
+  10⁶-step run **before agent overhead** — see open issues below)
+- Implemented `LiquidityProvider` / `LiquidityTaker` (`agents.py`)
+- Implemented the simulation loop with cancellation sweep and the α(1−δ) > μ
+  stability check (`simulation.py`)
+- Implemented the Hurst estimator H(Δτ), validated on a synthetic random walk
+  (`hurst.py`), and multi-run averaging (`average_hurst.py`)
 
-Files so far: `orderbook.py`, `test_orderbook.py`.
+Files so far: `orderbook.py`, `test_orderbook.py`, `agents.py`, `simulation.py`,
+`hurst.py`, `average_hurst.py`.
+
+Paper: `Papers/SimpleOrderBookModelPaper.pdf` (Preis et al. 2006, EPL 75, 510).
+Read directly; details below are checked against it.
+
+### Open issues (found reviewing the code against the paper)
+
+1. ~~Step order differs from Eq. 1.~~ **Fixed:** `simulation.py` now runs
+   providers → cancellation → takers, matching Eq. 1. Check: at the Fig. 2
+   parameters, mean book depth over the last 200 of 1,000 steps was ~1,236 vs
+   Eq. 2's 1,212.5.
+2. **Speed (measured):** 1,000 steps at N_A=250 took 0.51 s, so ~8.5 min per
+   10⁶-step run (extrapolated; sweep cost scales with book size, so N_A=500
+   will be slower). 50 runs ≈ 7 h per N_A=250 parameter set, so the full
+   Fig. 2c (N_A = 125/250/500) is a multi-hour job. Feasible but worth
+   parallelising (independent seeds) or speeding up the sweep before the
+   full-scale runs.
+3. ~~**No tests** for agents, simulation or hurst.~~ **Done:** `test_agents.py`,
+   `test_simulation.py`, `test_hurst.py` (run each with `python <file>`; ~4 s
+   total). Includes an Eq. 2 equilibrium-depth check that fails if the step
+   order is swapped (verified on a scratch copy).
+4. **Git case mismatch:** git tracks `Agents.py`, file on disk is `agents.py`.
+5. **Price definition:** the paper doesn't say mid-price vs trade price for
+   H(Δτ) and returns. Code uses mid-price; note this in the write-up.
+6. **Run aborts on a one-sided book** (`average_hurst.py` raises on `None`
+   mid-price). Deliberate, but a long run could hit it.
+7. **Nothing committed** since "Moved files." — commit the Phase 1 work so far.
 
 ---
 
@@ -23,19 +55,36 @@ This is your methodological foundation — anything you build later gets compare
 against this baseline.
 
 1. **Liquidity provider / taker agents**
-   - Implement the two agent classes described in Section 3 of the design doc
-   - Providers: limit orders only, rate α, exponentially distributed entry depth (λ₀)
-   - Takers: market orders only, rate μ
-   - Wire up the per-step simulation loop (Poisson/rate-based, per paper)
-2. **Reproduce Fig. 2** (symmetric, q=0.5 case)
-   - Price path over 10⁶ MCS
-   - Equilibrium depth profile (lognormal-ish)
-   - Hurst exponent H(Δτ) converging to 0.5 at long timescales
-3. **Add asymmetric order flow** (Section on perturbations)
-   - Mean-reverting random walk for q_taker
-   - Reproduce Fig. 3c (non-trivial Hurst exponent at medium timescales)
+   - ~~Implement the two agent classes described in Section 3 of the design doc~~
+   - ~~Providers: limit orders only, rate α, exponentially distributed entry depth (λ₀)~~
+   - ~~Takers: market orders only, rate μ~~
+   - ~~Wire up the per-step simulation loop~~ (done; see open issue 1 on step order)
+2. **Reproduce Fig. 2** (symmetric, q=0.5; α=0.15, μ=0.025, δ=0.025, λ₀=100)
+   - (a) Price path over 10⁶ MCS, N_A=250
+   - (b) Equilibrium depth profile ⟨N(p−p_m)⟩ averaged over 10⁴ MCS, N_A=500,
+     with lognormal fit *(needs depth-profile recording + plotting)*
+   - (c) H(Δτ) for N_A = 125, 250, 500 vs random walk: anti-persistent at short
+     Δτ, reaching 0.5 and staying there. Paper averages 50 runs. *(estimator
+     and averaging done; needs full-scale runs + plot)*
+   - (d) **Return distributions P(Δp)** for Δτ = 200, 400, 800, 1600, N_A=500
+     *(not yet planned or implemented — also needed for Figs. 3 and 4)*
+3. **Add asymmetric order flow** (needs shared, time-varying q_taker; currently
+   a fixed per-agent parameter)
+   - 3a. Bounded random walk: q_taker starts at ½, steps ±Δs each step,
+     Δs=0.001, reflecting bounds ½±S with S=0.05. Expect H rising to ~0.9 at
+     medium Δτ and *bimodal* returns (Fig. 3a/3b)
+   - 3c. Mean-reverting walk: probability of stepping toward ½ is
+     ½+|q−½|, Δs=0.001, S=½. Expect a more realistic H(Δτ) and ~Gaussian
+     returns (Fig. 3c/3d)
+   - Paper notes the same results if q_provider is perturbed instead
 4. **Add volatility-coupled entry depth** (Eq. 4)
-   - Reproduce Fig. 4 — confirm fat tails only appear with this feedback mechanism
+   - λ(t) = λ₀ · (1 + |q_taker(t)−½| / √⟨(q_taker−½)²⟩ · C_λ), λ₀=100, C_λ=10
+   - The average ⟨(q−½)²⟩ is "determined separately before the main
+     simulation" — paper gives no procedure, so a calibration pre-run must be
+     designed and documented
+   - Reproduce Fig. 4 — H(Δτ) qualitatively unchanged, but distinct fat tails
+     (exponential tails on semi-log plot) in P(Δp). Confirms fat tails only
+     appear with this feedback mechanism
 5. **Checkpoint / write-up**
    - Document this reproduction as validation in your methodology chapter
    - Keep this version frozen/tagged (e.g. git tag `baseline-v1`) as your control
@@ -107,5 +156,6 @@ Test regulatory levers against your model, following Jacob Leal & Napoletano:
 
 ## Immediate next step
 
-Implement the Phase 1 liquidity provider / taker agents and the simulation loop,
-targeting a Fig. 2 reproduction as the first concrete milestone.
+1. Commit the work so far (open issues 4 and 7).
+2. Decide how to handle speed before full-scale runs (open issue 2).
+3. Fig. 2 reproduction (panels a–d) as the first concrete milestone.
