@@ -106,6 +106,29 @@ def test_equilibrium_depth_distinguishes_step_order():
               abs(measured - expected) < 8)
 
 
+def test_depth_recording_is_consistent_with_total_orders():
+    n_steps, record_from, every = 400, 300, 5
+    r = run_simulation(n_agents=100, alpha=0.15, mu=0.025, delta=0.025, lambda_=100,
+                       n_steps=n_steps, seed=5, depth_record_from=record_from,
+                       depth_record_every=every)
+    check("midpoint defined throughout (needed for this test)", None not in r.mid_price_series)
+    expected_snapshots = len(range(record_from, n_steps, every))
+    check(f"{expected_snapshots} snapshots taken", r.n_depth_snapshots == expected_snapshots)
+    # Snapshots are taken at the same moment as total_orders_series is recorded.
+    expected_orders = sum(r.total_orders_series[record_from::every])
+    check("summed profile equals summed book sizes at snapshot steps",
+          sum(r.depth_profile_sum.values()) == expected_orders)
+    keys = list(r.depth_profile_sum)
+    check("bids have negative offsets, asks positive, none at the midpoint",
+          min(keys) < 0 < max(keys) and 0 not in keys)
+
+
+def test_depth_recording_off_by_default():
+    r = run_simulation(n_agents=50, alpha=0.15, mu=0.025, delta=0.025, lambda_=100,
+                       n_steps=50, seed=1)
+    check("no depth data unless requested", r.depth_profile_sum == {} and r.n_depth_snapshots == 0)
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

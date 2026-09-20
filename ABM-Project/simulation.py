@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from orderbook import OrderBook, Side, OrderResult
 from agents import LiquidityProvider, LiquidityTaker
@@ -38,6 +38,27 @@ class SimulationResult:
     n_match_failures: int                       # count of taker orders that hit an empty book
     n_trades: int
     book: OrderBook                              # final book state, for further inspection
+    # Summed resting-order counts by distance from the midpoint, over the snapshots taken
+    # (see run_simulation's depth_record_from). Keys are in HALF-ticks: 2*price - (best_bid + best_ask),
+    # so they are exact integers even though the midpoint can sit on a half-tick. Bids are negative,
+    # asks positive. Divide a bin's sum by n_depth_snapshots for the paper's <N(p - p_m)> (Fig. 2b).
+    depth_profile_sum: Dict[int, int] = field(default_factory=dict)
+    n_depth_snapshots: int = 0
+
+
+def _accumulate_depth(book: OrderBook, depth_sum: Dict[int, int]) -> int:
+    """Add the book's current depth, keyed by half-tick offset from the midpoint,
+    into depth_sum. Returns 1 if a snapshot was taken, 0 if there is no midpoint
+    (one side of the book empty)."""
+    best_bid, best_ask = book.best_bid(), book.best_ask()
+    if best_bid is None or best_ask is None:
+        return 0
+    mid2 = best_bid + best_ask   # twice the midpoint
+    for side in (Side.BID, Side.ASK):
+        for price, n_orders in book.depth_profile(side).items():
+            key = 2 * price - mid2
+            depth_sum[key] = depth_sum.get(key, 0) + n_orders
+    return 1
 
 
 def check_stability_condition(alpha: float, mu: float, delta: float) -> None:
@@ -72,6 +93,8 @@ def run_simulation(
     pre_opening_steps: int = 10,
     p0: int = 1_000_000,
     seed: Optional[int] = None,
+    depth_record_from: Optional[int] = None,
+    depth_record_every: int = 1,
 ) -> SimulationResult:
     """
     Run the base Preis et al. model for n_steps, after a pre-opening
@@ -79,6 +102,10 @@ def run_simulation(
 
     n_agents is used for both providers and takers, matching the paper's
     N_A convention (same agent count for both populations).
+
+    If depth_record_from is given, the book's depth profile relative to the
+    midpoint is recorded at the end of every depth_record_every-th step from
+    that step index (0 = first step after pre-opening) to the end of the run.
     """
     check_stability_condition(alpha, mu, delta)
 
@@ -102,6 +129,8 @@ def run_simulation(
     mid_price_series: List[Optional[float]] = []
     total_orders_series: List[int] = []
     n_match_failures = 0
+    depth_sum: Dict[int, int] = {}
+    n_depth_snapshots = 0
 
     for t in range(pre_opening_steps, pre_opening_steps + n_steps):
         # 1. Providers act
@@ -124,12 +153,19 @@ def run_simulation(
         mid_price_series.append(book.mid_price())
         total_orders_series.append(book.total_orders())
 
+        step = t - pre_opening_steps
+        if (depth_record_from is not None and step >= depth_record_from
+                and (step - depth_record_from) % depth_record_every == 0):
+            n_depth_snapshots += _accumulate_depth(book, depth_sum)
+
     return SimulationResult(
         mid_price_series=mid_price_series,
         total_orders_series=total_orders_series,
         n_match_failures=n_match_failures,
         n_trades=len(book.trades),
         book=book,
+        depth_profile_sum=depth_sum,
+        n_depth_snapshots=n_depth_snapshots,
     )
 
 

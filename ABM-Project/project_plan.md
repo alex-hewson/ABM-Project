@@ -29,12 +29,15 @@ Read directly; details below are checked against it.
    providers → cancellation → takers, matching Eq. 1. Check: at the Fig. 2
    parameters, mean book depth over the last 200 of 1,000 steps was ~1,236 vs
    Eq. 2's 1,212.5.
-2. **Speed (measured):** 1,000 steps at N_A=250 took 0.51 s, so ~8.5 min per
-   10⁶-step run (extrapolated; sweep cost scales with book size, so N_A=500
-   will be slower). 50 runs ≈ 7 h per N_A=250 parameter set, so the full
-   Fig. 2c (N_A = 125/250/500) is a multi-hour job. Feasible but worth
-   parallelising (independent seeds) or speeding up the sweep before the
-   full-scale runs.
+2. **Speed (measured, corrects an earlier optimistic estimate):** a 1,000-step
+   run took 0.51 s, but that was while the book was still filling. In steady
+   state, N_A=250 costs ~0.9 ms/step (~15 min per 10⁶ steps), rising slowly as
+   the lazy-deletion heaps accumulate stale entries (hundreds of thousands
+   after 3×10⁴ steps; memory grows too). 8 parallel workers gave only ~2.7×
+   speedup, not 8×. Fig. 2 at paper scale (10⁶ steps, 50 runs × N_A =
+   125/250/500) is therefore ~17 h wall time as the code stands. Options:
+   reduce scale, or speed up the loop (O(N) cancellation sweep is the main
+   cost; heap compaction would fix the memory growth).
 3. ~~**No tests** for agents, simulation or hurst.~~ **Done:** `test_agents.py`,
    `test_simulation.py`, `test_hurst.py` (run each with `python <file>`; ~4 s
    total). Includes an Eq. 2 equilibrium-depth check that fails if the step
