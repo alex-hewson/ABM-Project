@@ -46,7 +46,17 @@ class LiquidityProvider:
         r = rng or random
         if r.random() >= self.alpha:
             return None
+        return self.submit(book, timestamp, fallback_price, r)
 
+    def submit(
+            self, book: OrderBook, timestamp: int, fallback_price: int, rng: Optional[random.Random] = None
+    ) -> int:
+        '''
+        Submit a limit order unconditionally: the part of maybe_submit that follows the alpha draw.
+        Lets the fast simulation loop decide *how many* providers act in a step in one go.
+        Returns the order_id.
+        '''
+        r = rng or random
         mid = book.mid_price()
         reference_price = mid if mid is not None else fallback_price
 
@@ -81,7 +91,13 @@ class LiquidityTaker:
 
         if r.random() >= self.mu:
             return None
+        return self.submit(book, timestamp, r)
 
+    def submit(
+            self, book: OrderBook, timestamp: int, rng: Optional[random.Random] = None
+            ) -> OrderResult:
+        '''Submit a market order unconditionally: the part of maybe_submit that follows the mu draw.'''
+        r = rng or random
         side = Side.BID if r.random() < self.q_taker else Side.ASK
 
         result, order_id =  book.submit_market_order(side, timestamp, agent_id=self.agent_id)

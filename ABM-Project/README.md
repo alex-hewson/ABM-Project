@@ -13,7 +13,7 @@ Current status and next steps are in [docs/project_plan.md](docs/project_plan.md
 |---|---|
 | `abm/` | The model: `orderbook.py` (matching engine), `agents.py` (liquidity providers / takers), `simulation.py` (step loop) |
 | `analysis/` | Measurements on simulation output: `hurst.py` (Hurst exponent), `average_hurst.py` (averaging over runs), `returns.py` (return distributions) |
-| `experiments/` | Scripts that reproduce the paper's figures: `fig2.py` (run + save data), `plot_fig2.py` (draw from saved data) |
+| `experiments/` | Scripts that reproduce the paper's figures: `fig2.py` (run + save data), `plot_fig2.py` (draw from saved data), `provenance.py` (records the git commit in saved results) |
 | `tests/` | Tests for all of the above |
 | `docs/` | Project plan |
 | `results/` | Generated data and plots (not tracked by git) |
@@ -30,6 +30,7 @@ python -m tests.test_agents
 python -m tests.test_simulation
 python -m tests.test_hurst
 python -m tests.test_returns
+python -m tests.test_provenance
 ```
 
 A single simulation with the paper's Fig. 2 parameters (short run):
@@ -48,4 +49,4 @@ python -m experiments.plot_fig2 --data results/fig2_quick.pkl --out results/fig2
 
 ## Requirements
 
-Python 3.10+ with `numpy` and `matplotlib`.
+Python 3.12+ (the fast simulation method uses `random.binomialvariate`) with `numpy` and `matplotlib`.

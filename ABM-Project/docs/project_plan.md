@@ -30,15 +30,19 @@ Read directly; details below are checked against it.
    providers → cancellation → takers, matching Eq. 1. Check: at the Fig. 2
    parameters, mean book depth over the last 200 of 1,000 steps was ~1,236 vs
    Eq. 2's 1,212.5.
-2. **Speed (measured, corrects an earlier optimistic estimate):** a 1,000-step
-   run took 0.51 s, but that was while the book was still filling. In steady
-   state, N_A=250 costs ~0.9 ms/step (~15 min per 10⁶ steps), rising slowly as
-   the lazy-deletion heaps accumulate stale entries (hundreds of thousands
-   after 3×10⁴ steps; memory grows too). 8 parallel workers gave only ~2.7×
-   speedup, not 8×. Fig. 2 at paper scale (10⁶ steps, 50 runs × N_A =
-   125/250/500) is therefore ~17 h wall time as the code stands. Options:
-   reduce scale, or speed up the loop (O(N) cancellation sweep is the main
-   cost; heap compaction would fix the memory growth).
+2. ~~**Speed.**~~ **Improved on branch `speedup-loop`.** Originally ~0.9 ms/step
+   at N_A=250 (~15 min per 10⁶ steps), with heaps that grew without bound.
+   Now `run_simulation(method="fast")` (the default) draws *how many* providers
+   act / orders are cancelled / takers act from a Binomial and picks that many
+   at random, which is statistically equivalent for IID agents; heaps no longer
+   bloat; `total_orders()` is O(1). Measured single-process: N_A=250 ≈ 27 s per
+   10⁵ steps, N_A=500 ≈ 66 s (about 3× faster than before). The literal
+   per-agent loop is kept as `method="agents"` (the reference), and
+   `tests/test_simulation.py` checks the two agree. The machine has 4 physical
+   cores (8 threads, laptop chip), so parallel runs give only ~2.4× speedup.
+   The 12-run trial (10⁵ steps) went 506 s → 177 s. Estimated paper scale
+   (10⁶ steps, 50 runs × N_A = 125/250/500): ~15 h CPU ≈ 6 h wall. What's left
+   is real per-order cost in the matching engine.
 3. ~~**No tests** for agents, simulation or hurst.~~ **Done:** `test_agents.py`,
    `test_simulation.py`, `test_hurst.py` (run each with `python <file>`; ~4 s
    total). Includes an Eq. 2 equilibrium-depth check that fails if the step

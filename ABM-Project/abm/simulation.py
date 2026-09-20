@@ -95,6 +95,7 @@ def run_simulation(
     seed: Optional[int] = None,
     depth_record_from: Optional[int] = None,
     depth_record_every: int = 1,
+    method: str = "fast",
 ) -> SimulationResult:
     """
     Run the base Preis et al. model for n_steps, after a pre-opening
@@ -106,7 +107,21 @@ def run_simulation(
     If depth_record_from is given, the book's depth profile relative to the
     midpoint is recorded at the end of every depth_record_every-th step from
     that step index (0 = first step after pre-opening) to the end of the run.
+
+    method selects how each step's random events are generated. Both give the
+    same distribution of outcomes; they differ only in cost and random stream
+    (the same seed gives different, but statistically equivalent, runs):
+      "agents": the literal reference. Every agent flips its own alpha / mu coin
+                and every resting order is tested for cancellation, one by one.
+      "fast":   draws *how many* providers act, orders are cancelled and takers
+                act from a Binomial, then picks that many agents / orders at
+                random. Valid because agents are IID and each order is
+                cancelled independently with probability delta. Several times
+                faster; use for long runs.
     """
+    if method not in ("fast", "agents"):
+        raise ValueError(f"method must be 'fast' or 'agents', got {method!r}")
+    fast = method == "fast"
     check_stability_condition(alpha, mu, delta)
 
     rng = random.Random(seed)
@@ -121,10 +136,42 @@ def run_simulation(
         for i in range(n_agents)
     ]
 
+    def providers_act(t: int) -> None:
+        if fast:
+            for i in rng.sample(range(n_agents), rng.binomialvariate(n_agents, alpha)):
+                providers[i].submit(book, t, p0, rng)
+        else:
+            for p in providers:
+                p.maybe_submit(book, timestamp=t, fallback_price=p0, rng=rng)
+
+    def cancellation_sweep() -> None:
+        if fast:
+            k = rng.binomialvariate(book.total_orders(), delta)
+            for order_id in book.sample_resting_order_ids(k, rng):
+                book.cancel_order(order_id)
+        else:
+            # Snapshot ids first: don't mutate the structure you're iterating.
+            for side in (Side.BID, Side.ASK):
+                for order_id in book.resting_order_ids(side):
+                    if rng.random() < delta:
+                        book.cancel_order(order_id)
+
+    def takers_act(t: int) -> int:
+        """Returns the number of market orders that found an empty book."""
+        failures = 0
+        if fast:
+            for i in rng.sample(range(n_agents), rng.binomialvariate(n_agents, mu)):
+                if takers[i].submit(book, t, rng) is OrderResult.NO_MATCH:
+                    failures += 1
+        else:
+            for taker in takers:
+                if taker.maybe_submit(book, timestamp=t, rng=rng) is OrderResult.NO_MATCH:
+                    failures += 1
+        return failures
+
     # --- Pre-opening: providers only, so takers never face an empty book ---
     for t in range(pre_opening_steps):
-        for p in providers:
-            p.maybe_submit(book, timestamp=t, fallback_price=p0, rng=rng)
+        providers_act(t)
 
     mid_price_series: List[Optional[float]] = []
     total_orders_series: List[int] = []
@@ -133,22 +180,9 @@ def run_simulation(
     n_depth_snapshots = 0
 
     for t in range(pre_opening_steps, pre_opening_steps + n_steps):
-        # 1. Providers act
-        for p in providers:
-            p.maybe_submit(book, timestamp=t, fallback_price=p0, rng=rng)
-
-        # 2. Cancellation sweep -- each resting order removed w.p. delta.
-        # Snapshot ids first: don't mutate the structure you're iterating.
-        for side in (Side.BID, Side.ASK):
-            for order_id in book.resting_order_ids(side):
-                if rng.random() < delta:
-                    book.cancel_order(order_id)
-
-        # 3. Takers act
-        for taker in takers:
-            result = taker.maybe_submit(book, timestamp=t, rng=rng)
-            if result is OrderResult.NO_MATCH:
-                n_match_failures += 1
+        providers_act(t)                        # 1. Providers act
+        cancellation_sweep()                    # 2. Each resting order removed w.p. delta
+        n_match_failures += takers_act(t)       # 3. Takers act
 
         mid_price_series.append(book.mid_price())
         total_orders_series.append(book.total_orders())

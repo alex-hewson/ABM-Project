@@ -82,6 +82,10 @@ class OrderBook:
         self._ask_heap: List[int] = []   # stores price (min-heap)
 
         self._order_lookup: Dict[int, Order] = {}   # order_id -> Order, for cancellation
+        # Resting order ids as an indexable list (with id -> position), so that a uniformly
+        # random subset can be drawn in O(k). Removal swaps the last id into the gap.
+        self._resting_ids: List[int] = []
+        self._resting_pos: Dict[int, int] = {}
         self._id_counter = itertools.count(1)
 
         self.trades: List[Trade] = []
@@ -141,8 +145,7 @@ class OrderBook:
         return {p: len(q) for p, q in book.items() if q}
 
     def total_orders(self) -> int:
-        return sum(len(q) for q in self.bids.values()) + \
-               sum(len(q) for q in self.asks.values())
+        return len(self._order_lookup)
 
     # ------------------------------------------------------------------ #
     # Submitting orders
@@ -186,12 +189,38 @@ class OrderBook:
 
     def _rest_order(self, order: Order) -> None:
         book = self.bids if order.side is Side.BID else self.asks
+        new_level = order.price not in book
         book.setdefault(order.price, deque()).append(order)
         self._order_lookup[order.order_id] = order
-        if order.side is Side.BID:
-            heapq.heappush(self._bid_heap, -order.price)
-        else:
-            heapq.heappush(self._ask_heap, order.price)
+        self._resting_pos[order.order_id] = len(self._resting_ids)
+        self._resting_ids.append(order.order_id)
+
+        # A price only needs a heap entry when its level is created; pushing one per order
+        # (as an earlier version did) grew the heaps without bound.
+        if new_level:
+            if order.side is Side.BID:
+                heapq.heappush(self._bid_heap, -order.price)
+                if len(self._bid_heap) > 2 * len(self.bids) + 64:
+                    self._bid_heap = [-p for p in self.bids]     # drop stale entries
+                    heapq.heapify(self._bid_heap)
+            else:
+                heapq.heappush(self._ask_heap, order.price)
+                if len(self._ask_heap) > 2 * len(self.asks) + 64:
+                    self._ask_heap = list(self.asks)
+                    heapq.heapify(self._ask_heap)
+
+    def _forget(self, order_id: int) -> Optional[Order]:
+        """Stop tracking a resting order (matched or cancelled). Returns the Order,
+        or None if it wasn't resting."""
+        order = self._order_lookup.pop(order_id, None)
+        if order is None:
+            return None
+        pos = self._resting_pos.pop(order_id)
+        last_id = self._resting_ids.pop()
+        if last_id != order_id:              # move the last id into the freed slot
+            self._resting_ids[pos] = last_id
+            self._resting_pos[last_id] = pos
+        return order
 
     # ------------------------------------------------------------------ #
     # Matching engine core
@@ -249,7 +278,7 @@ class OrderBook:
             queue.popleft()
             if not queue:
                 del opposite_book[best_opposite]
-            self._order_lookup.pop(resting_order.order_id, None)
+            self._forget(resting_order.order_id)
 
             # Unit order size in this base model: incoming order is now
             # fully filled after consuming exactly one resting order.
@@ -275,7 +304,7 @@ class OrderBook:
     def cancel_order(self, order_id: int) -> bool:
         """Remove a resting order from the book. Returns False if the
         order_id doesn't exist (already matched or already cancelled)."""
-        order = self._order_lookup.pop(order_id, None)
+        order = self._forget(order_id)
         if order is None:
             return False
         book = self.bids if order.side is Side.BID else self.asks
@@ -289,6 +318,11 @@ class OrderBook:
         if not queue:
             del book[order.price]
         return True
+
+    def sample_resting_order_ids(self, k: int, rng) -> List[int]:
+        """k distinct resting order ids chosen uniformly at random (both sides), in O(k).
+        rng is a random.Random."""
+        return rng.sample(self._resting_ids, k)
 
     def resting_order_ids(self, side: Side) -> List[int]:
         """All order_ids currently resting on one side -- useful for the

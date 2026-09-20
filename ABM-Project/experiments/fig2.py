@@ -30,6 +30,7 @@ import numpy as np
 from abm.simulation import run_simulation
 from analysis.hurst import hurst_curve
 from analysis.returns import return_counts
+from experiments.provenance import git_info, describe
 
 PARAMS = dict(alpha=0.15, mu=0.025, delta=0.025, lambda_=100, q_provider=0.5, q_taker=0.5)
 AGENT_COUNTS = (125, 250, 500)
@@ -84,11 +85,18 @@ def main():
     parser.add_argument("--out", type=Path, default=RESULTS_DIR / "fig2_data.pkl")
     args = parser.parse_args()
 
+    # Captured before the runs start, so it describes the code the workers actually load.
+    git = git_info()
+
     jobs = [(n, seed, args.n_steps) for n in AGENT_COUNTS for seed in range(args.n_runs)]
     # Slowest jobs (largest N_A) first so the pool doesn't end waiting on one long run.
     jobs.sort(key=lambda j: -j[0])
     print(f"{len(jobs)} runs ({args.n_runs} per N_A in {AGENT_COUNTS}), {args.n_steps:,} steps each, "
           f"{args.workers} workers")
+    print(f"code version: {describe(git)}")
+    if git["dirty"]:
+        print("WARNING: uncommitted changes -- these results won't match any single commit. "
+              "Commit first if you want them reproducible.")
 
     start = time.perf_counter()
     runs = []
@@ -104,7 +112,8 @@ def main():
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with open(args.out, "wb") as f:
         pickle.dump({"config": {"n_steps": args.n_steps, "n_runs": args.n_runs, "params": PARAMS,
-                                "return_bin_edges": RETURN_BIN_EDGES, "depth_window": DEPTH_WINDOW},
+                                "return_bin_edges": RETURN_BIN_EDGES, "depth_window": DEPTH_WINDOW,
+                                "git": git},
                      "runs": runs}, f)
     print(f"saved {args.out} ({time.perf_counter() - start:.0f}s total)")
 

@@ -106,6 +106,50 @@ def test_equilibrium_depth_distinguishes_step_order():
               abs(measured - expected) < 8)
 
 
+def test_unknown_method_is_rejected():
+    check("method must be 'fast' or 'agents'", raises_value_error(lambda: run_simulation(
+        n_agents=10, alpha=0.15, mu=0.025, delta=0.025, lambda_=100, n_steps=10, method="turbo")))
+
+
+def test_both_methods_reproduce_eq2_and_expected_trade_rate():
+    """Equilibrium depth (Eq. 2) and the trade rate (each step, on average mu*N_A market orders
+    execute) are known exactly, so they check each method against theory, not just each other."""
+    n_agents, alpha, mu, delta, n_steps = 250, 0.3, 0.1, 0.2, 1_500
+    expected_depth = eq2_equilibrium_orders(n_agents, alpha, mu, delta)   # 175 (a swapped step order gives 200)
+    for method in ("agents", "fast"):
+        r = run_simulation(n_agents=n_agents, alpha=alpha, mu=mu, delta=delta, lambda_=100,
+                           n_steps=n_steps, seed=3, method=method)
+        depth = mean_tail_orders(r)
+        check(f"{method}: mean depth {depth:.1f} within 8 of Eq. 2's 175", abs(depth - expected_depth) < 8)
+        rate = r.n_trades / n_steps
+        check(f"{method}: {rate:.2f} trades/step within 3% of mu*N_A = {mu * n_agents:.0f}",
+              abs(rate - mu * n_agents) < 0.03 * mu * n_agents)
+
+
+def test_fast_method_is_statistically_equivalent_to_reference():
+    """Same seed gives different runs under the two methods, so compare statistics averaged over
+    seeds. Tolerances are ~3 standard errors of the difference, measured from run-to-run spread."""
+    from analysis.hurst import rms_price_change
+    n_agents, n_steps, burn_in, tau, seeds = 100, 3_000, 500, 50, range(12)
+    stats = {}
+    for method in ("agents", "fast"):
+        rms, depth, trades = [], [], []
+        for s in seeds:
+            r = run_simulation(n_agents=n_agents, alpha=0.15, mu=0.025, delta=0.025, lambda_=100,
+                               n_steps=n_steps, seed=s, method=method)
+            rms.append(rms_price_change(r.mid_price_series[burn_in:], tau))
+            depth.append(sum(r.total_orders_series[burn_in:]) / (n_steps - burn_in))
+            trades.append(r.n_trades / n_steps)
+        stats[method] = tuple(sum(v) / len(v) for v in (rms, depth, trades))
+    (rms_a, depth_a, trades_a), (rms_f, depth_f, trades_f) = stats["agents"], stats["fast"]
+    check(f"RMS price change at tau={tau}: agents {rms_a:.2f} vs fast {rms_f:.2f} (within 1.0)",
+          abs(rms_a - rms_f) < 1.0)
+    check(f"mean book depth: agents {depth_a:.1f} vs fast {depth_f:.1f} (within 8)",
+          abs(depth_a - depth_f) < 8)
+    check(f"trades per step: agents {trades_a:.3f} vs fast {trades_f:.3f} (within 0.04)",
+          abs(trades_a - trades_f) < 0.04)
+
+
 def test_depth_recording_is_consistent_with_total_orders():
     n_steps, record_from, every = 400, 300, 5
     r = run_simulation(n_agents=100, alpha=0.15, mu=0.025, delta=0.025, lambda_=100,

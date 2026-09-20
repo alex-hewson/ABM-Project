@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from experiments.fig2 import RESULTS_DIR, AGENT_COUNTS, PATH_AGENTS, DEPTH_AGENTS, RETURN_TAUS
+from experiments.provenance import describe
 from analysis.returns import counts_to_density
 
 
@@ -95,6 +96,9 @@ def main():
     plot_returns(axes[1, 1], runs, config["return_bin_edges"])
     fig.suptitle(f"Fig. 2 reproduction: {config['n_steps']:,} steps, {config['n_runs']} runs per N$_A$")
     fig.tight_layout()
+    if "git" in config:    # results saved before commit IDs were recorded won't have it
+        fig.text(0.995, 0.005, f"code version: {describe(config['git'])}", ha="right", va="bottom",
+                 fontsize=7, color="gray")
     args.out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.out, dpi=130)
     print(f"saved {args.out}")

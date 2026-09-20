@@ -122,14 +122,84 @@ def test_depth_profile_and_total_orders():
     check("bid depth profile has two levels", len(ob.depth_profile(Side.BID)) == 2)
 
 
+def _check_book_consistency(ob):
+    """Compare the book's cached state against a brute-force recount from its price levels."""
+    resting = [o.order_id for q in ob.bids.values() for o in q] + \
+              [o.order_id for q in ob.asks.values() for o in q]
+    assert ob.total_orders() == len(resting), "total_orders disagrees with the price levels"
+    assert set(ob._resting_ids) == set(resting), "sampleable id list disagrees with the price levels"
+    assert len(ob._resting_ids) == len(set(ob._resting_ids)), "duplicate ids in sampleable list"
+    assert all(ob._resting_ids[pos] == oid for oid, pos in ob._resting_pos.items()), "id positions are stale"
+    assert ob.best_bid() == (max(ob.bids) if ob.bids else None), "best_bid disagrees with brute force"
+    assert ob.best_ask() == (min(ob.asks) if ob.asks else None), "best_ask disagrees with brute force"
+
+
+def test_cached_state_stays_consistent_under_random_activity():
+    import random
+    rng = random.Random(0)
+    ob = OrderBook()
+    ids = []
+    for step in range(4000):
+        action = rng.random()
+        if action < 0.5:
+            side = Side.BID if rng.random() < 0.5 else Side.ASK
+            ids.append(ob.submit_limit_order(side, 1000 + rng.randint(-30, 30), step))
+        elif action < 0.7:
+            ob.submit_market_order(Side.BID if rng.random() < 0.5 else Side.ASK, step)
+        elif ids:
+            ob.cancel_order(ids.pop(rng.randrange(len(ids))))
+        _check_book_consistency(ob)
+    check("total_orders, sampleable ids and best prices agree with brute force after 4000 random operations", True)
+
+
+def test_heaps_stay_small_over_a_long_run():
+    import random
+    rng = random.Random(1)
+    ob = OrderBook()
+    # Bids in 900-999, asks in 1001-1100: nothing crosses, so orders rest and the book keeps a
+    # steady population (~1 new order per step; a market order or cancellation removes ~1).
+    for i in range(500):
+        ob.submit_limit_order(Side.BID, rng.randint(900, 999), 0)
+        ob.submit_limit_order(Side.ASK, rng.randint(1001, 1100), 0)
+    for step in range(30_000):
+        if rng.random() < 0.5:
+            ob.submit_limit_order(Side.BID, rng.randint(900, 999), step)
+        else:
+            ob.submit_limit_order(Side.ASK, rng.randint(1001, 1100), step)
+        if rng.random() < 0.25:
+            ob.submit_market_order(Side.BID if rng.random() < 0.5 else Side.ASK, step)
+        for oid in ob.sample_resting_order_ids(1 if rng.random() < 0.75 else 0, rng):
+            ob.cancel_order(oid)
+    check(f"book kept a steady population ({ob.total_orders()} orders)", 300 < ob.total_orders() < 5000)
+    check(f"heap sizes ({len(ob._bid_heap)}, {len(ob._ask_heap)}) stay near the ~100 price levels per side, "
+          f"not the ~30,000 orders submitted",
+          len(ob._bid_heap) < 500 and len(ob._ask_heap) < 500)
+
+
+def test_sample_resting_order_ids():
+    import random
+    rng = random.Random(2)
+    ob = OrderBook()
+    placed = {ob.submit_limit_order(Side.BID, 100 - i, 0) for i in range(20)}
+    placed |= {ob.submit_limit_order(Side.ASK, 200 + i, 0) for i in range(20)}
+    check("k=0 gives an empty list", ob.sample_resting_order_ids(0, rng) == [])
+    sample = ob.sample_resting_order_ids(15, rng)
+    check("15 distinct ids", len(sample) == 15 and len(set(sample)) == 15)
+    check("all sampled ids are resting orders", set(sample) <= placed)
+    check("sampling everything returns every resting order",
+          set(ob.sample_resting_order_ids(40, rng)) == placed)
+    counts = {}
+    for _ in range(4000):
+        for oid in ob.sample_resting_order_ids(4, rng):
+            counts[oid] = counts.get(oid, 0) + 1
+    # each of 40 orders is picked with probability 4/40 per draw -> expect 400 each
+    check("sampling is roughly uniform (each order picked 300-500 times of 4000 draws)",
+          all(300 < counts.get(oid, 0) < 500 for oid in placed))
+
+
 if __name__ == "__main__":
-    test_empty_book()
-    test_basic_resting_and_priority()
-    test_spread_and_matching_like_paper_figure_1()
-    test_market_order_against_empty_book_is_dropped_not_raised()
-    test_cancellation()
-    test_price_level_removed_when_emptied()
-    test_best_price_walks_correctly_after_level_exhausted()
-    test_depth_profile_and_total_orders()
+    for name, fn in list(globals().items()):
+        if name.startswith("test_"):
+            fn()
     print("\nAll tests passed.")
 
