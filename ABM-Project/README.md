@@ -31,6 +31,7 @@ python -m tests.test_simulation
 python -m tests.test_hurst
 python -m tests.test_returns
 python -m tests.test_provenance
+python -m tests.test_checkpoint
 ```
 
 A single simulation with the paper's Fig. 2 parameters (short run):
@@ -46,6 +47,13 @@ default (10^6 steps, 50 runs per N_A) takes many hours, so try a small one first
 python -m experiments.fig2 --n-steps 100000 --n-runs 4 --out results/fig2_quick.pkl
 python -m experiments.plot_fig2 --data results/fig2_quick.pkl --out results/fig2_quick.png
 ```
+
+Each run is saved as soon as it finishes (in `<name>.pkl.parts/`), so an interruption
+(sleep, crash, power cut) loses at most the runs in progress. To continue, repeat the same
+command with `--resume`; already-saved runs are skipped. `--resume` also extends a finished
+experiment: run 10 seeds now, then rerun with `--n-runs 50 --resume` to add the other 40. It
+refuses if the settings or code version differ from the saved runs (`--allow-code-change`
+overrides the code check when you know the change doesn't affect the simulation).
 
 ## Requirements
 
