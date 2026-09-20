@@ -18,8 +18,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List
 
-from simulation import run_simulation
-from hurst import hurst_curve
+from abm.simulation import run_simulation
+from analysis.hurst import hurst_curve
 
 
 @dataclass

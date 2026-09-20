@@ -1,5 +1,5 @@
 """
-Tests for LiquidityProvider / LiquidityTaker. Run with: python test_agents.py
+Tests for LiquidityProvider / LiquidityTaker. Run with: python -m tests.test_agents   (from the project root)
 
 Covers the rules from the paper's model definition: providers place limit
 orders only, at exponentially distributed depth around the midpoint (or a
@@ -9,8 +9,8 @@ side probabilities q_provider / q_taker decide bid vs ask / buy vs sell.
 
 import random
 
-from orderbook import OrderBook, Side, OrderResult
-from agents import LiquidityProvider, LiquidityTaker
+from abm.orderbook import OrderBook, Side, OrderResult
+from abm.agents import LiquidityProvider, LiquidityTaker
 
 
 def check(label, condition):

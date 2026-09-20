@@ -12,8 +12,8 @@ small derived quantities are kept per run, and everything is saved to one
 pickle so that plot_fig2.py can redraw figures without re-simulating.
 
 Usage (paper scale is the default; expect hours):
-    python fig2.py --n-steps 100000 --n-runs 4          # quick check
-    python fig2.py                                       # 10^6 steps, 50 runs per N_A
+    python -m experiments.fig2 --n-steps 100000 --n-runs 4    # quick check
+    python -m experiments.fig2                                 # 10^6 steps, 50 runs per N_A
 """
 
 from __future__ import annotations
@@ -27,9 +27,9 @@ from pathlib import Path
 
 import numpy as np
 
-from simulation import run_simulation
-from hurst import hurst_curve
-from returns import return_counts
+from abm.simulation import run_simulation
+from analysis.hurst import hurst_curve
+from analysis.returns import return_counts
 
 PARAMS = dict(alpha=0.15, mu=0.025, delta=0.025, lambda_=100, q_provider=0.5, q_taker=0.5)
 AGENT_COUNTS = (125, 250, 500)
@@ -42,7 +42,7 @@ RETURN_TAUS = (200, 400, 800, 1600)
 # spurious bumps from bins that happen to catch more or fewer grid points.
 _half_ticks = np.unique(np.round(np.logspace(np.log10(2), np.log10(10_000), 41)))
 RETURN_BIN_EDGES = (_half_ticks - 0.5) / 2
-RESULTS_DIR = Path(__file__).parent / "results"
+RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
 
 
 def run_one(job):

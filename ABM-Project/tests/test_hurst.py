@@ -1,5 +1,5 @@
 """
-Tests for the Hurst estimator and multi-run averaging. Run with: python test_hurst.py
+Tests for the Hurst estimator and multi-run averaging. Run with: python -m tests.test_hurst   (from the project root)
 
 The estimator is checked against series where the answer is known exactly
 (a straight line has H = 1) or approximately (a random walk has H = 0.5), plus
@@ -8,8 +8,8 @@ one hand-worked RMS calculation.
 
 import math
 
-from hurst import rms_price_change, log_spaced_taus, hurst_curve, synthetic_random_walk
-from average_hurst import average_hurst_over_runs
+from analysis.hurst import rms_price_change, log_spaced_taus, hurst_curve, synthetic_random_walk
+from analysis.average_hurst import average_hurst_over_runs
 
 
 def check(label, condition):

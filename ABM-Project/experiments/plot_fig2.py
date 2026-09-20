@@ -1,7 +1,7 @@
 """
 Draw the four panels of Fig. 2 from the data saved by fig2.py.
 
-    python plot_fig2.py [--data results/fig2_data.pkl] [--out results/fig2.png]
+    python -m experiments.plot_fig2 [--data results/fig2_data.pkl] [--out results/fig2.png]
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from fig2 import RESULTS_DIR, AGENT_COUNTS, PATH_AGENTS, DEPTH_AGENTS, RETURN_TAUS
-from returns import counts_to_density
+from experiments.fig2 import RESULTS_DIR, AGENT_COUNTS, PATH_AGENTS, DEPTH_AGENTS, RETURN_TAUS
+from analysis.returns import counts_to_density
 
 
 def load(path):

@@ -1,5 +1,5 @@
 """
-Tests for the simulation loop. Run with: python test_simulation.py
+Tests for the simulation loop. Run with: python -m tests.test_simulation   (from the project root)
 
 The main check is against the paper's Eq. 2, the equilibrium book depth:
 
@@ -11,8 +11,8 @@ Eq. 1). At the paper's Fig. 2 parameters the two possible orders differ by only
 ~14% and the test can actually tell them apart.
 """
 
-from orderbook import Side
-from simulation import run_simulation, check_stability_condition
+from abm.orderbook import Side
+from abm.simulation import run_simulation, check_stability_condition
 
 
 def check(label, condition):

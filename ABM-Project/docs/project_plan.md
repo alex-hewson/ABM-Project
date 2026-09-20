@@ -17,8 +17,9 @@
 - Implemented the Hurst estimator H(Δτ), validated on a synthetic random walk
   (`hurst.py`), and multi-run averaging (`average_hurst.py`)
 
-Files so far: `orderbook.py`, `test_orderbook.py`, `agents.py`, `simulation.py`,
-`hurst.py`, `average_hurst.py`.
+Code layout (see `README.md`): `abm/` (orderbook, agents, simulation), `analysis/`
+(hurst, average_hurst, returns), `experiments/` (fig2, plot_fig2), `tests/`.
+Run everything from the project root with `python -m ...`.
 
 Paper: `Papers/SimpleOrderBookModelPaper.pdf` (Preis et al. 2006, EPL 75, 510).
 Read directly; details below are checked against it.

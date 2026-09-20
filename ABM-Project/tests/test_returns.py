@@ -1,10 +1,10 @@
 """
-Tests for the return-distribution helpers. Run with: python test_returns.py
+Tests for the return-distribution helpers. Run with: python -m tests.test_returns   (from the project root)
 """
 
 import numpy as np
 
-from returns import return_counts, counts_to_density
+from analysis.returns import return_counts, counts_to_density
 
 
 def check(label, condition):

@@ -1,5 +1,5 @@
 """
-Hand-worked test cases for OrderBook. Run with: python3 test_orderbook.py
+Hand-worked test cases for OrderBook. Run with: python -m tests.test_orderbook   (from the project root)
 
 These aren't exhaustive, but they cover the core invariants you want to
 trust before building agents on top of this: price-time priority, spread
@@ -7,7 +7,7 @@ narrowing/widening on trades, market order matching, cancellation, and the
 edge case of an empty opposite book.
 """
 
-from orderbook import OrderBook, Side, OrderResult
+from abm.orderbook import OrderBook, Side, OrderResult
 
 
 def check(label, condition):
