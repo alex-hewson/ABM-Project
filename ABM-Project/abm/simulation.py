@@ -26,6 +26,8 @@ import random
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+import numpy as np
+
 from abm.orderbook import OrderBook, Side, OrderResult
 from abm.agents import LiquidityProvider, LiquidityTaker
 
@@ -44,6 +46,10 @@ class SimulationResult:
     # asks positive. Divide a bin's sum by n_depth_snapshots for the paper's <N(p - p_m)> (Fig. 2b).
     depth_profile_sum: Dict[int, int] = field(default_factory=dict)
     n_depth_snapshots: int = 0
+    # Per-step summaries of the trade prices in that step ("first", "last", "median", "mean"), with NaN
+    # for steps with no trade. Filled only if run_simulation(record_trade_prices=True). The median of an
+    # even number of trades is the upper of the two middle values. See analysis/prices.py.
+    trade_price_steps: Dict[str, np.ndarray] = field(default_factory=dict)
 
 
 def _accumulate_depth(book: OrderBook, depth_sum: Dict[int, int]) -> int:
@@ -96,6 +102,8 @@ def run_simulation(
     depth_record_from: Optional[int] = None,
     depth_record_every: int = 1,
     method: str = "fast",
+    keep_trades: bool = True,
+    record_trade_prices: bool = False,
 ) -> SimulationResult:
     """
     Run the base Preis et al. model for n_steps, after a pre-opening
@@ -118,6 +126,12 @@ def run_simulation(
                 random. Valid because agents are IID and each order is
                 cancelled independently with probability delta. Several times
                 faster; use for long runs.
+
+    record_trade_prices=True stores the first / last / median / mean trade price
+    of every step (result.trade_price_steps) in a compact form.
+    keep_trades=False stops the book keeping a Trade object per trade, which
+    saves a lot of memory in long runs (result.book.trades is then empty;
+    result.n_trades still counts the trades).
     """
     if method not in ("fast", "agents"):
         raise ValueError(f"method must be 'fast' or 'agents', got {method!r}")
@@ -125,7 +139,9 @@ def run_simulation(
     check_stability_condition(alpha, mu, delta)
 
     rng = random.Random(seed)
-    book = OrderBook()
+    step_trade_prices: List[int] = []     # prices of the trades in the current step
+    book = OrderBook(keep_trades=keep_trades,
+                     on_trade=step_trade_prices.append if record_trade_prices else None)
 
     providers = [
         LiquidityProvider(agent_id=i, alpha=alpha, q_provider=q_provider, lambda_=lambda_)
@@ -172,7 +188,10 @@ def run_simulation(
     # --- Pre-opening: providers only, so takers never face an empty book ---
     for t in range(pre_opening_steps):
         providers_act(t)
+    step_trade_prices.clear()    # any pre-opening trades don't belong to a recorded step
 
+    trade_price_steps = {name: np.full(n_steps, np.nan) for name in ("first", "last", "median", "mean")} \
+        if record_trade_prices else {}
     mid_price_series: List[Optional[float]] = []
     total_orders_series: List[int] = []
     n_match_failures = 0
@@ -188,6 +207,12 @@ def run_simulation(
         total_orders_series.append(book.total_orders())
 
         step = t - pre_opening_steps
+        if record_trade_prices and step_trade_prices:
+            trade_price_steps["first"][step] = step_trade_prices[0]
+            trade_price_steps["last"][step] = step_trade_prices[-1]
+            trade_price_steps["median"][step] = sorted(step_trade_prices)[len(step_trade_prices) // 2]
+            trade_price_steps["mean"][step] = sum(step_trade_prices) / len(step_trade_prices)
+            step_trade_prices.clear()
         if (depth_record_from is not None and step >= depth_record_from
                 and (step - depth_record_from) % depth_record_every == 0):
             n_depth_snapshots += _accumulate_depth(book, depth_sum)
@@ -196,10 +221,11 @@ def run_simulation(
         mid_price_series=mid_price_series,
         total_orders_series=total_orders_series,
         n_match_failures=n_match_failures,
-        n_trades=len(book.trades),
+        n_trades=book.n_trades,
         book=book,
         depth_profile_sum=depth_sum,
         n_depth_snapshots=n_depth_snapshots,
+        trade_price_steps=trade_price_steps,
     )
 
 

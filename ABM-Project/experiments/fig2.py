@@ -7,9 +7,15 @@ Data generation for Fig. 2 of Preis et al. (2006): the symmetric model
     (c) Hurst exponent H(delta tau) for N_A = 125, 250, 500, averaged over runs
     (d) distributions of price increments for delta tau = 200, 400, 800, 1600, N_A = 500
 
-Runs are independent (one seed each), so they are spread over CPU cores. Only
-small derived quantities are kept per run, and everything is saved to one
-pickle so that plot_fig2.py can redraw figures without re-simulating.
+The paper doesn't say which "price" it uses, and the choice changes (c) at short lags, so every
+run stores results for ALL the definitions in analysis/prices.py (mid, last, first, median, mean).
+For (c) it stores the RMS price change at ~80 lags from 1 to n_steps/10, not finished H values;
+plot_fig2.py derives H from those (see analysis/hurst.py), so lag spacing and price definition
+can be changed later without re-simulating.
+
+Runs are independent (one seed each), so they are spread over CPU cores. Only small derived
+quantities are kept per run, and everything is saved to one pickle so that plot_fig2.py can
+redraw figures without re-simulating.
 
 Each run is also saved the moment it finishes (see checkpoint.py), so an interrupted
 experiment can be continued with --resume. Resuming with a larger --n-runs extends it.
@@ -33,18 +39,21 @@ from pathlib import Path
 import numpy as np
 
 from abm.simulation import run_simulation
-from analysis.hurst import hurst_curve
+from analysis.hurst import log_spaced_taus, rms_at_lags
+from analysis.prices import PRICE_DEFINITIONS, price_series
 from analysis.returns import return_counts
 from experiments.provenance import git_info, describe
 from experiments.checkpoint import (atomic_pickle, parts_dir_for, has_parts, save_meta, load_meta,
                                     save_part, load_parts, check_compatible)
 
+RESULTS_FORMAT = 2           # bump when what each run stores changes, so old files aren't mixed in
 PARAMS = dict(alpha=0.15, mu=0.025, delta=0.025, lambda_=100, q_provider=0.5, q_taker=0.5)
 AGENT_COUNTS = (125, 250, 500)
 PATH_AGENTS = 250            # panel (a)
 DEPTH_AGENTS = 500           # panel (b) and (d)
 DEPTH_WINDOW = 10_000        # panel (b): average depth over this many final steps
 RETURN_TAUS = (200, 400, 800, 1600)
+LAG_POINTS = 80              # number of log-spaced lags (from 1 to n_steps/10) at which RMS is stored
 # |increment| bins in ticks, log-spaced. Mid-prices live on a half-tick grid, so edges are placed
 # 0.25 tick off the grid: every bin then holds a whole number of grid values, and there are no
 # spurious bumps from bins that happen to catch more or fewer grid points.
@@ -60,37 +69,49 @@ def run_one(job):
     result = run_simulation(
         n_agents=n_agents, n_steps=n_steps, seed=seed,
         depth_record_from=max(0, n_steps - DEPTH_WINDOW) if record_depth else None,
+        keep_trades=False,            # millions of Trade objects per run otherwise
+        record_trade_prices=True,
         **PARAMS,
     )
-    prices = result.mid_price_series
-    if any(p is None for p in prices):
-        raise ValueError(f"N_A={n_agents}, seed={seed}: book went one-sided (mid-price None); "
-                         f"the Hurst calculation needs a gap-free series.")
 
-    taus, h = hurst_curve(prices, min_tau=10, max_tau=n_steps // 10, n_points=30)
+    taus = np.array(log_spaced_taus(1, n_steps // 10, LAG_POINTS))
+    rms, counts, mid_path = {}, {}, None
+    for name in PRICE_DEFINITIONS:
+        try:
+            prices = price_series(result, name)
+        except ValueError as error:
+            raise ValueError(f"N_A={n_agents}, seed={seed}, price={name}: {error}") from error
+        rms[name] = rms_at_lags(prices, taus)
+        counts[name] = {tau: return_counts(prices, tau, RETURN_BIN_EDGES, absolute=True)
+                        for tau in RETURN_TAUS if tau < n_steps}
+        if name == "mid":
+            mid_path = prices
+
     return {
         "n_agents": n_agents,
         "seed": seed,
         "taus": taus,
-        "h": h,
-        "return_counts": {tau: return_counts(prices, tau, RETURN_BIN_EDGES, absolute=True)
-                          for tau in RETURN_TAUS if tau < n_steps},
+        "rms": rms,                    # {price definition: RMS price change at each lag in taus}
+        "return_counts": counts,       # {price definition: {delta tau: histogram counts of |increment|}}
         "depth_sum": result.depth_profile_sum,
         "n_depth_snapshots": result.n_depth_snapshots,
         "mean_orders": float(np.mean(result.total_orders_series)),
         "n_trades": result.n_trades,
         "n_match_failures": result.n_match_failures,
-        "price_path": np.array(prices) if (n_agents == PATH_AGENTS and seed == 0) else None,
+        "price_path": mid_path if (n_agents == PATH_AGENTS and seed == 0) else None,   # mid-price
     }
 
 
-CHECKED_SETTINGS = ("n_steps", "params", "return_bin_edges", "depth_window")   # must match to combine runs
+# Settings that must match for saved runs to be combined with new ones.
+CHECKED_SETTINGS = ("format", "n_steps", "params", "return_bin_edges", "depth_window",
+                    "price_definitions", "lag_points")
 
 
 def make_config(n_steps: int, git: dict) -> dict:
     """The settings that define an experiment; saved with the results and checked on --resume."""
-    return {"n_steps": n_steps, "params": PARAMS, "return_bin_edges": RETURN_BIN_EDGES,
-            "depth_window": DEPTH_WINDOW, "git": git}
+    return {"format": RESULTS_FORMAT, "n_steps": n_steps, "params": PARAMS,
+            "return_bin_edges": RETURN_BIN_EDGES, "depth_window": DEPTH_WINDOW,
+            "price_definitions": PRICE_DEFINITIONS, "lag_points": LAG_POINTS, "git": git}
 
 
 def main(argv=None):
@@ -176,7 +197,6 @@ def main(argv=None):
     args.out.parent.mkdir(parents=True, exist_ok=True)
     atomic_pickle({"config": {**config, "n_runs": args.n_runs}, "runs": [finished[k] for k in all_keys]}, args.out)
     print(f"saved {args.out} ({time.perf_counter() - start:.0f}s this session)")
-
     shutil.rmtree(parts_dir)   # everything in it is now in the results file
 
 

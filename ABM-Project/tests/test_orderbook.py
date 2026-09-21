@@ -197,6 +197,29 @@ def test_sample_resting_order_ids():
           all(300 < counts.get(oid, 0) < 500 for oid in placed))
 
 
+def test_trade_hook_and_counter_without_storing_trades():
+    def play(book):
+        book.submit_limit_order(Side.BID, 100, 0)
+        book.submit_limit_order(Side.ASK, 105, 0)
+        book.submit_limit_order(Side.ASK, 106, 0)
+        book.submit_market_order(Side.BID, 1)      # hits 105
+        book.submit_market_order(Side.ASK, 2)      # hits 100
+        book.submit_market_order(Side.BID, 3)      # hits 106
+        book.submit_market_order(Side.BID, 4)      # nothing left on the ask side: no trade
+
+    prices = []
+    lean = OrderBook(keep_trades=False, on_trade=prices.append)
+    full = OrderBook()
+    play(lean)
+    play(full)
+    check("hook receives every trade price in order", prices == [105, 100, 106])
+    check("n_trades counts trades whether or not they are stored", lean.n_trades == 3 and full.n_trades == 3)
+    check("keep_trades=False stores no Trade objects", lean.trades == [])
+    check("default still stores them", [t.price for t in full.trades] == [105, 100, 106])
+    check("book state is identical either way", lean.best_bid() == full.best_bid() and
+          lean.total_orders() == full.total_orders())
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

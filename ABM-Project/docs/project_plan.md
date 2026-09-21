@@ -48,8 +48,33 @@ Read directly; details below are checked against it.
    total). Includes an Eq. 2 equilibrium-depth check that fails if the step
    order is swapped (verified on a scratch copy).
 4. **Git case mismatch:** git tracks `Agents.py`, file on disk is `agents.py`.
-5. **Price definition:** the paper doesn't say mid-price vs trade price for
-   H(Δτ) and returns. Code uses mid-price; note this in the write-up.
+5. **Fig. 2c short-lag H does not match (UNRESOLVED).** The paper's curve has
+   its lowest point ≈0.08 near Δτ≈10 (user's reading of the PDF; y-axis starts
+   at 0.05). Ours (mid-price) bottoms out at 0.22–0.27 at Δτ≈10–20. The paper
+   doesn't say mid-price vs trade price. One-run checks (seed 0, 10⁵ steps):
+   mid-price H(10) = 0.27/0.24/0.21 and reaches 0.48 by Δτ≈300–800;
+   last-trade-price H(10) = 0.06/0.05/0.03 (N_A = 125/250/500), H(100) ≈
+   0.11–0.19, and reaches 0.48 only at Δτ≈2,500–3,400. The paper's 0.08 lies
+   between/nearer the trade price. More readings from the paper: H(100) ≈
+   0.22–0.25, curves reach 0.5 at Δτ≈10³–10⁴, N_A=500 lowest at the minimum
+   → the trade price fits, the mid-price does not. **But which trade price:**
+   H at short lags depends strongly on where in the step it is sampled
+   (2 seeds, 10⁵ steps; min H for N_A=250/500): last trade in step
+   0.03/0.02, random trade 0.05/0.04, median 0.08/0.07, first trade
+   0.086/0.088, mean of the step's trades 0.13/0.12, mid-price 0.22/0.21.
+   Median and first-trade match the paper's ≈0.08 and H(100)≈0.2 (median also
+   gives the N_A ordering); last-trade is too low. None is obviously "the"
+   definition — the paper doesn't say — so this is a convention we must
+   choose, justify and document, not a finding. **Done:** the runner now
+   stores RMS price change per lag (~80 lags, 1 to n_steps/10) and return
+   histograms for five definitions (mid, last, first, median, mean), and
+   `plot_fig2.py --price ...` plus a comparison figure lets the choice be made
+   after the full run. Still to do: pick one (see `docs/decisions.md`, D11).
+5b. ~~**Fig. 2c x-range**~~ **Fixed:** H is derived at plot time from stored
+   RMS values with one-sided differences at the ends, so the curve now spans
+   Δτ = 1 to n_steps/10 and shows the rise to the left of the minimum.
+   (Results files from before this change (format 1) can't be plotted or
+   extended and must be regenerated.)
 6. **Run aborts on a one-sided book** (`average_hurst.py` raises on `None`
    mid-price). Deliberate, but a long run could hit it.
 7. **Nothing committed** since "Moved files." — commit the Phase 1 work so far.
@@ -70,12 +95,15 @@ against this baseline.
 2. **Reproduce Fig. 2** (symmetric, q=0.5; α=0.15, μ=0.025, δ=0.025, λ₀=100)
    - (a) Price path over 10⁶ MCS, N_A=250
    - (b) Equilibrium depth profile ⟨N(p−p_m)⟩ averaged over 10⁴ MCS, N_A=500,
-     with lognormal fit *(needs depth-profile recording + plotting)*
+     with lognormal fit *(recording + plot done; lognormal fit still to do)*
    - (c) H(Δτ) for N_A = 125, 250, 500 vs random walk: anti-persistent at short
-     Δτ, reaching 0.5 and staying there. Paper averages 50 runs. *(estimator
-     and averaging done; needs full-scale runs + plot)*
+     Δτ, reaching 0.5 and staying there. Paper averages 50 runs. *(done at
+     10⁶ steps × 10 runs, commit f9bae8f: H = 0.23–0.28 at short lags, 0.48–0.50
+     ± 0.01 at 10³–10⁴, consistent with 0.5 at long lags but noisy (±0.03).
+     Extend to 50 runs with `--n-runs 50 --resume`.)*
    - (d) **Return distributions P(Δp)** for Δτ = 200, 400, 800, 1600, N_A=500
-     *(not yet planned or implemented — also needed for Figs. 3 and 4)*
+     *(done: no fat tails, kurtosis ≈ 2.7–2.9 (Gaussian = 3), rising with Δτ.
+     Axis convention of the paper's panel unconfirmed — check against the PDF.)*
 3. **Add asymmetric order flow** (needs shared, time-varying q_taker; currently
    a fixed per-agent parameter)
    - 3a. Bounded random walk: q_taker starts at ½, steps ±Δs each step,

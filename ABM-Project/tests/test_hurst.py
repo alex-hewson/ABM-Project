@@ -8,7 +8,10 @@ one hand-worked RMS calculation.
 
 import math
 
-from analysis.hurst import rms_price_change, log_spaced_taus, hurst_curve, synthetic_random_walk
+import numpy as np
+
+from analysis.hurst import (rms_price_change, log_spaced_taus, hurst_curve, synthetic_random_walk,
+                            rms_at_lags, local_slopes)
 from analysis.average_hurst import average_hurst_over_runs
 
 
@@ -81,6 +84,42 @@ def test_average_hurst_over_runs():
           single.mean_h == single.min_h == single.max_h)
     check("averaging is deterministic for a given base_seed",
           average_hurst_over_runs(n_runs=3, base_seed=0, **kwargs).mean_h == r.mean_h)
+
+
+def test_rms_at_lags_matches_the_reference_implementation():
+    walk = synthetic_random_walk(3_000, seed=6)
+    taus = [1, 2, 7, 50, 400]
+    fast = rms_at_lags(walk, taus)
+    slow = [rms_price_change(walk, t) for t in taus]
+    check("numpy RMS equals the pure-Python RMS at every lag", np.allclose(fast, slow))
+
+
+def test_local_slopes_recover_a_known_power_law_including_the_ends():
+    taus = np.array(log_spaced_taus(1, 10_000, 40))
+    for exponent in (0.3, 0.5, 1.0):
+        slopes = local_slopes(taus, taus ** exponent)
+        check(f"RMS ~ tau^{exponent}: slope is {exponent} at every lag, first and last included",
+              np.allclose(slopes, exponent))
+    check("one slope per lag (no end points lost)", len(local_slopes(taus, taus)) == len(taus))
+
+
+def test_local_slopes_end_points_are_one_sided():
+    taus = np.array([1.0, 10.0, 100.0])
+    values = np.array([1.0, 10.0, 1000.0])       # slope 1 between the first two lags, 2 between the last two
+    slopes = local_slopes(taus, values)
+    check("first lag uses the difference to its neighbour", np.isclose(slopes[0], 1.0))
+    check("last lag uses the difference to its neighbour", np.isclose(slopes[-1], 2.0))
+    check("interior uses the centred difference", np.isclose(slopes[1], 1.5))
+
+
+def test_stored_rms_route_agrees_with_hurst_curve_and_a_random_walk():
+    walk = synthetic_random_walk(100_000, seed=1)
+    taus = np.array(log_spaced_taus(10, 5_000, 20))
+    slopes = local_slopes(taus, rms_at_lags(walk, taus))
+    old_taus, old_h = hurst_curve(walk, min_tau=10, max_tau=5_000, n_points=20)
+    check("interior slopes equal hurst_curve's values",
+          np.allclose(slopes[1:-1], old_h) and list(taus[1:-1]) == list(old_taus))
+    check(f"random walk: mean H {slopes.mean():.3f} within 0.05 of 0.5", abs(slopes.mean() - 0.5) < 0.05)
 
 
 if __name__ == "__main__":

@@ -183,6 +183,18 @@ def test_extending_a_finished_experiment_reuses_its_runs():
     check("and the results file is left intact", len(after_refusal["runs"]) == 6)
 
 
+def test_results_from_an_older_format_are_not_mixed_in():
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "r.pkl"
+        old_config = {k: v for k, v in fig2.make_config(STEPS, git_info()).items()
+                      if k not in ("format", "price_definitions", "lag_points")}
+        atomic_pickle({"config": old_config, "runs": [{"n_agents": 125, "seed": 0, "h": [0.1]}]}, out)
+        text, error = run_main(out, "--resume")
+        untouched = load_final(out)["runs"] == [{"n_agents": 125, "seed": 0, "h": [0.1]}]
+    check("resume refuses, naming the setting that differs", error is not None and "format" in error)
+    check("the old file is left untouched", untouched)
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

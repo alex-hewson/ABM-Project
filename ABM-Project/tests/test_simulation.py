@@ -150,6 +150,16 @@ def test_fast_method_is_statistically_equivalent_to_reference():
           abs(trades_a - trades_f) < 0.04)
 
 
+def test_not_keeping_trades_changes_nothing_but_memory():
+    kwargs = dict(n_agents=60, alpha=0.15, mu=0.025, delta=0.025, lambda_=100, n_steps=300, seed=8)
+    full = run_simulation(**kwargs)
+    lean = run_simulation(keep_trades=False, record_trade_prices=True, **kwargs)
+    check("identical price path", full.mid_price_series == lean.mid_price_series)
+    check("identical book sizes", full.total_orders_series == lean.total_orders_series)
+    check("identical trade count", full.n_trades == lean.n_trades == len(full.book.trades))
+    check("no Trade objects stored", lean.book.trades == [])
+
+
 def test_depth_recording_is_consistent_with_total_orders():
     n_steps, record_from, every = 400, 300, 5
     r = run_simulation(n_agents=100, alpha=0.15, mu=0.025, delta=0.025, lambda_=100,

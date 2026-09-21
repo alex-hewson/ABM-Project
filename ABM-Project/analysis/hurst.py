@@ -16,6 +16,8 @@ import math
 import random
 from typing import List, Sequence, Tuple
 
+import numpy as np
+
 
 def rms_price_change(prices: Sequence[float], tau: int) -> float:
     """
@@ -69,6 +71,34 @@ def hurst_curve(prices: Sequence[float], min_tau: int, max_tau: int, n_points: i
         h_out.append(slope)
 
     return taus_out, h_out
+
+
+# ---------------------------------------------------------------------- #
+# Two-stage version: store RMS per lag, derive H later
+#
+# Storing the RMS price change at a dense set of lags (instead of finished H
+# values) lets H be recomputed at plot time -- with different lag spacing, or
+# for a different price definition -- without re-simulating.
+# ---------------------------------------------------------------------- #
+
+def rms_at_lags(prices: Sequence[float], taus: Sequence[int]) -> np.ndarray:
+    """RMS of p(t+tau) - p(t) over all valid t, for each lag in taus (numpy; same values as
+    rms_price_change, but fast enough for 10^6-step series)."""
+    p = np.asarray(prices, dtype=float)
+    return np.array([np.sqrt(np.mean((p[tau:] - p[:-tau]) ** 2)) for tau in taus])
+
+
+def local_slopes(taus: Sequence[float], values: Sequence[float]) -> np.ndarray:
+    """d ln(values) / d ln(taus) at every lag: the centred difference between neighbouring lags
+    inside the range (as hurst_curve does), and a one-sided difference at the first and last lag,
+    so H is defined over the whole range instead of losing an end point on each side."""
+    x = np.log(np.asarray(taus, dtype=float))
+    y = np.log(np.asarray(values, dtype=float))
+    slopes = np.empty_like(y)
+    slopes[1:-1] = (y[2:] - y[:-2]) / (x[2:] - x[:-2])
+    slopes[0] = (y[1] - y[0]) / (x[1] - x[0])
+    slopes[-1] = (y[-1] - y[-2]) / (x[-1] - x[-2])
+    return slopes
 
 
 # ---------------------------------------------------------------------- #

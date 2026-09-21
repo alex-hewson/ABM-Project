@@ -15,7 +15,7 @@ import itertools
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Deque, Dict, List, Optional
+from typing import Callable, Deque, Dict, List, Optional
 
 # Enumeration defining simple order book, buy one side sell the other.
 class Side(Enum):
@@ -74,7 +74,13 @@ class OrderBook:
     common-case (matching at the current best price) cheap.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, keep_trades: bool = True, on_trade: Optional[Callable[[int], None]] = None) -> None:
+        """
+        keep_trades=False stops the book storing a Trade object per trade (self.trades stays empty;
+        self.n_trades still counts them). A 10^6-step run executes millions of trades, so long runs
+        that don't need the full record should turn this off.
+        on_trade, if given, is called with the price of every trade as it happens.
+        """
         self.bids: Dict[int, Deque[Order]] = {}
         self.asks: Dict[int, Deque[Order]] = {}
 
@@ -89,6 +95,9 @@ class OrderBook:
         self._id_counter = itertools.count(1)
 
         self.trades: List[Trade] = []
+        self.n_trades = 0
+        self._keep_trades = keep_trades
+        self._on_trade = on_trade
 
     # ------------------------------------------------------------------ #
     # Order id generation
@@ -288,14 +297,18 @@ class OrderBook:
         self, timestamp: int, price: int, aggressor_side: Side,
         resting_order: Order, aggressor_agent_id: Optional[int],
     ) -> None:
-        self.trades.append(Trade(
-            timestamp=timestamp,
-            price=price,
-            aggressor_side=aggressor_side,
-            resting_order_id=resting_order.order_id,
-            resting_agent_id=resting_order.agent_id,
-            aggressor_agent_id=aggressor_agent_id,
-        ))
+        self.n_trades += 1
+        if self._on_trade is not None:
+            self._on_trade(price)
+        if self._keep_trades:
+            self.trades.append(Trade(
+                timestamp=timestamp,
+                price=price,
+                aggressor_side=aggressor_side,
+                resting_order_id=resting_order.order_id,
+                resting_agent_id=resting_order.agent_id,
+                aggressor_agent_id=aggressor_agent_id,
+            ))
 
     # ------------------------------------------------------------------ #
     # Cancellation
