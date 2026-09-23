@@ -1,9 +1,14 @@
 """
-Tests for the Hurst estimator and multi-run averaging. Run with: python -m tests.test_hurst   (from the project root)
+Tests for the Hurst estimator. Run with: python -m tests.test_hurst   (from the project root)
 
 The estimator is checked against series where the answer is known exactly
 (a straight line has H = 1) or approximately (a random walk has H = 0.5), plus
 one hand-worked RMS calculation.
+
+Multi-run averaging of H(delta tau) is not tested here: it's done by
+experiments/fig2.py itself now (an earlier standalone analysis/average_hurst.py
+did this before the runner existed; removed once the runner superseded it --
+see docs/project_plan.md).
 """
 
 import math
@@ -12,7 +17,6 @@ import numpy as np
 
 from analysis.hurst import (rms_price_change, log_spaced_taus, hurst_curve, synthetic_random_walk,
                             rms_at_lags, local_slopes)
-from analysis.average_hurst import average_hurst_over_runs
 
 
 def check(label, condition):
@@ -67,23 +71,6 @@ def test_hurst_of_random_walk_is_about_half():
     mean_h = sum(hs) / len(hs)
     # single runs are noisy at large lags (individual H values wander by ~0.1), hence a loose bound
     check(f"mean H {mean_h:.3f} within 0.05 of 0.5", abs(mean_h - 0.5) < 0.05)
-
-
-def test_average_hurst_over_runs():
-    kwargs = dict(n_agents=100, alpha=0.15, mu=0.025, delta=0.025, lambda_=100,
-                  n_steps=2_000, min_tau=10, max_tau=500, n_points=10)
-    r = average_hurst_over_runs(n_runs=3, base_seed=0, **kwargs)
-    check("n_runs recorded", r.n_runs == 3)
-    check("all output lists have one entry per tau",
-          len(r.taus) == len(r.mean_h) == len(r.min_h) == len(r.max_h))
-    check("min <= mean <= max at every tau",
-          all(lo <= m <= hi for lo, m, hi in zip(r.min_h, r.mean_h, r.max_h)))
-
-    single = average_hurst_over_runs(n_runs=1, base_seed=0, **kwargs)
-    check("with one run, mean == min == max",
-          single.mean_h == single.min_h == single.max_h)
-    check("averaging is deterministic for a given base_seed",
-          average_hurst_over_runs(n_runs=3, base_seed=0, **kwargs).mean_h == r.mean_h)
 
 
 def test_rms_at_lags_matches_the_reference_implementation():

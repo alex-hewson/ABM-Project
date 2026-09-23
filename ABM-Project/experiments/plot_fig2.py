@@ -21,6 +21,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+from analysis.depth_profile import profile_from_depth_sum, combine_sides, fit_lognormal
 from analysis.hurst import local_slopes
 from analysis.prices import PRICE_DEFINITIONS
 from analysis.returns import counts_to_density
@@ -58,20 +59,36 @@ def plot_price_path(ax, runs):
 
 
 def plot_depth(ax, runs):
-    """<N(p - p_m)>: mean number of resting orders per tick at each distance from the midpoint."""
-    total = defaultdict(int)
+    """<N(p - p_m)>: mean number of resting orders per tick at each distance from the midpoint,
+    with a lognormal fit (method of moments; see analysis/depth_profile.py and docs/decisions.md,
+    D14) to the two sides combined."""
+    total_depth_sum = defaultdict(int)
     n_snapshots = 0
     for r in runs:
         if r["n_agents"] != DEPTH_AGENTS:
             continue
         n_snapshots += r["n_depth_snapshots"]
         for half_ticks, n in r["depth_sum"].items():
-            total[half_ticks // 2] += n            # 1-tick bins (floor of half-tick offset / 2)
-    ticks = np.array(sorted(total))
-    mean_depth = np.array([total[k] for k in ticks]) / n_snapshots
-    ax.plot(ticks, mean_depth, ".", ms=2)
+            total_depth_sum[half_ticks] += n
+    profile = profile_from_depth_sum(total_depth_sum, n_snapshots)
+    ticks = np.array(sorted(profile))
+    mean_depth = np.array([profile[k] for k in ticks])
+    ax.plot(ticks, mean_depth, ".", ms=2, label="simulation data")
+
+    # combine_sides sums bid + ask counts at each |x|, so a fit to it describes the COMBINED
+    # (both-sides) mass at each distance. Plotting that curve on both sides of the midpoint would
+    # double-count -- each side gets half the fitted mass back, matching the fact that each side's
+    # raw data (plotted above) is itself about half of the combined total.
+    fit = fit_lognormal(combine_sides(profile))
+    x = np.linspace(1, 600, 400)
+    one_side = fit.total_weight / 2 * fit.density(x)
+    ax.plot(x, one_side, "k--", lw=1, label="lognormal fit")
+    ax.plot(-x, one_side, "k--", lw=1)
+
     ax.set(xlim=(-600, 600), xlabel="p - p$_m$ [ticks]", ylabel="<N(p - p$_m$)>",
-           title=f"(b) depth, N$_A$={DEPTH_AGENTS} (no lognormal fit yet)")
+           title=f"(b) depth, N$_A$={DEPTH_AGENTS}")
+    ax.legend(fontsize=7)
+    return fit
 
 
 def plot_hurst(ax, runs, price):
@@ -86,7 +103,8 @@ def plot_hurst(ax, runs, price):
     ax.legend(fontsize=7)
 
 
-def plot_returns(ax, runs, bin_edges, price):
+def plot_returns(ax, runs, bin_edges_by_price, price):
+    bin_edges = bin_edges_by_price[price]
     centres = np.sqrt(bin_edges[:-1] * bin_edges[1:])   # geometric centre of log-spaced bins
     for tau in RETURN_TAUS:
         counts = sum(r["return_counts"][price][tau] for r in runs

@@ -16,12 +16,17 @@ from abm.orderbook import OrderBook, Side, OrderResult
 The liquidity provider only submits limit orders around the midpoint.
 The midpoint is p_m = (p_a + p_b)/2, where p_a, p_b are best ask and best bid respectively.
 The initial midpoint is set to 1,000,000 ticks, on a 2,000,000 tick model, so in the middle (literally "the midpoint")
-Initially only limit orders can be placed for a couple of steps, to allow the order book to populate properly, without instability.
+Initially only limit orders can be placed, to allow the order book to populate properly without instability.
 
 At every step each provider submits a limit order with probability alpha. 
 P(bid) = 1-P(ask), and prices are offset from the midpoint by an exponential distribution (e^-{lambda})
 
 The providers and takers are IID, as the paper requires. So random decision each step regardless of the last decision.
+
+
+In the fast loop of the simulation, the decisions to submit an order / cancel are made in one go, then attributed to individual agents.
+This avoids looping through all agents every step (slow)
+Hence just submit instead of maybe_submit (and maybe_submit now just runs into submit)
 '''
 @dataclass
 class LiquidityProvider:
@@ -53,7 +58,7 @@ class LiquidityProvider:
     ) -> int:
         '''
         Submit a limit order unconditionally: the part of maybe_submit that follows the alpha draw.
-        Lets the fast simulation loop decide *how many* providers act in a step in one go.
+        Included as a separate function to allow fast simulation loop to decide how many providers act in a step in one go.
         Returns the order_id.
         '''
         r = rng or random

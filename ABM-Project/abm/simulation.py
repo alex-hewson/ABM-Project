@@ -2,14 +2,19 @@
 Simulation loop for the Preis et al. (2006) order book model.
 
 Wires together LiquidityProvider and LiquidityTaker agents (agents.py)
-around the OrderBook matching engine (orderbook.py), plus the one piece
-neither agent type owns: order cancellation. Cancellation isn't agent
-behavior -- no single agent decides to cancel someone else's resting
-order -- so it's implemented here as a book-level sweep, following the
-paper's Eq. 1: each resting order is removed with probability delta,
-once per step.
+around the OrderBook matching engine (orderbook.py). 
+Cancellcation also occurs here, as it isn't agent behaviour (An agent can't cancel anothers resting order).
+Hence cancellation implemented here as a book-level sweep, with probability delta once per step (as in the paper)
+
 
 Per-step order, following the paper's Eq. 1,
+
+N(t) is total number of orders
+alpha is rate that liquidity providers submit limit orders (or prob of them submitting an order individually)
+N_A is the number of liquidity providers (equals number of takers in simple model)
+delta is probability of order being removed (cancelled)
+mu is rate that liq takers submit market orders
+
 N(t+1) = (N(t) + alpha*N_A) - (N(t) + alpha*N_A)*delta - mu*N_A:
   1. Providers act (submit limit orders)
   2. Cancellation sweep over all resting orders (including this step's new ones)
@@ -40,12 +45,21 @@ class SimulationResult:
     n_match_failures: int                       # count of taker orders that hit an empty book
     n_trades: int
     book: OrderBook                              # final book state, for further inspection
-    # Summed resting-order counts by distance from the midpoint, over the snapshots taken
-    # (see run_simulation's depth_record_from). Keys are in HALF-ticks: 2*price - (best_bid + best_ask),
-    # so they are exact integers even though the midpoint can sit on a half-tick. Bids are negative,
-    # asks positive. Divide a bin's sum by n_depth_snapshots for the paper's <N(p - p_m)> (Fig. 2b).
+
+    # dict below describes the order book's average shape: how many orders sit at each distance from the
+    # midpoint (not raw price / dist from centre), averaged over many points in time during the run (see
+    # depth_record_from below).
+
+    #This dict holds a running total (sum) of orders at each distance, from various snapshots taken by depth_record_from.
+    #An average is calculated at the end by dividing this sum by number of snapshots taken (n_depth_snapshots)
+    #This avg is the paper's <N(p-p_m)> in fig. 2b
+
+    #Each key in the dict is a half distance (so a price 0.5 away is 1 key away). 
+    #Doubling of the price to get the key avoids floats.  midpoint key = 2*price - (best_bid + best_ask)  (bids and asks are integers)
+    #Negative entry is a bid, positive is an ask.
     depth_profile_sum: Dict[int, int] = field(default_factory=dict)
     n_depth_snapshots: int = 0
+    
     # Per-step summaries of the trade prices in that step ("first", "last", "median", "mean"), with NaN
     # for steps with no trade. Filled only if run_simulation(record_trade_prices=True). The median of an
     # even number of trades is the upper of the two middle values. See analysis/prices.py.
@@ -114,14 +128,14 @@ def run_simulation(
 
     If depth_record_from is given, the book's depth profile relative to the
     midpoint is recorded at the end of every depth_record_every-th step from
-    that step index (0 = first step after pre-opening) to the end of the run.
+    that step index (0 = first step after pre-opening) to the end of the run (every 1 step by default).
 
     method selects how each step's random events are generated. Both give the
     same distribution of outcomes; they differ only in cost and random stream
     (the same seed gives different, but statistically equivalent, runs):
       "agents": the literal reference. Every agent flips its own alpha / mu coin
                 and every resting order is tested for cancellation, one by one.
-      "fast":   draws *how many* providers act, orders are cancelled and takers
+      "fast":   draws how many providers act, orders are cancelled and takers
                 act from a Binomial, then picks that many agents / orders at
                 random. Valid because agents are IID and each order is
                 cancelled independently with probability delta. Several times
@@ -135,7 +149,7 @@ def run_simulation(
     """
     if method not in ("fast", "agents"):
         raise ValueError(f"method must be 'fast' or 'agents', got {method!r}")
-    fast = method == "fast"
+    fast = method == "fast"    #Checks which method has been selected
     check_stability_condition(alpha, mu, delta)
 
     rng = random.Random(seed)
@@ -154,14 +168,19 @@ def run_simulation(
 
     def providers_act(t: int) -> None:
         if fast:
+            #rng.sample(population, k) selects k unique elements from population w/o replacement
+            #So binomial distribution of agents each with prob alpha, then gives number of active agents.
+            #Then each selected agent submits an order.
             for i in rng.sample(range(n_agents), rng.binomialvariate(n_agents, alpha)):
                 providers[i].submit(book, t, p0, rng)
         else:
             for p in providers:
+                #Each agent individually decided whether to submit
                 p.maybe_submit(book, timestamp=t, fallback_price=p0, rng=rng)
 
     def cancellation_sweep() -> None:
         if fast:
+            #Randomly selects k orders to be cancelled (k decided as though each agent has prob delta of cancelling)
             k = rng.binomialvariate(book.total_orders(), delta)
             for order_id in book.sample_resting_order_ids(k, rng):
                 book.cancel_order(order_id)
@@ -173,7 +192,8 @@ def run_simulation(
                         book.cancel_order(order_id)
 
     def takers_act(t: int) -> int:
-        """Returns the number of market orders that found an empty book."""
+        """Returns the number of market orders that found an empty book.
+        Also submits the takers orders, under normal conditions failures should stay 0"""
         failures = 0
         if fast:
             for i in rng.sample(range(n_agents), rng.binomialvariate(n_agents, mu)):

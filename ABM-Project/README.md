@@ -11,12 +11,39 @@ Current status and next steps are in [docs/project_plan.md](docs/project_plan.md
 
 | Folder | Contents |
 |---|---|
-| `abm/` | The model: `orderbook.py` (matching engine), `agents.py` (liquidity providers / takers), `simulation.py` (step loop) |
-| `analysis/` | Measurements on simulation output: `hurst.py` (Hurst exponent), `average_hurst.py` (averaging over runs), `returns.py` (return distributions), `prices.py` (price series under different definitions of "price") |
-| `experiments/` | Scripts that reproduce the paper's figures: `fig2.py` (run + save data), `plot_fig2.py` (draw from saved data), `provenance.py` (records the git commit in saved results) |
-| `tests/` | Tests for all of the above |
+| `abm/` | The model: `orderbook.py` (matching engine), `agents.py` (liquidity providers / takers), `simulation.py` (step loop, runs agents through orderbook) |
+| `analysis/` | Measurements on one simulation's output: `prices.py` (price series), `hurst.py` (Hurst exponent), `returns.py` (return distributions), `depth_profile.py` (depth profile + lognormal fit) |
+| `experiments/` | Scripts that reproduce the paper's figures: `fig2.py` (run many simulations + save), `plot_fig2.py` (draw from saved data); `checkpoint.py` and `provenance.py` are support code these two use, not called directly |
+| `tests/` | One test file per file above — twice the file count, but nothing beyond what it tests |
 | `docs/` | `project_plan.md` (status and next steps), `decisions.md` (assumptions and choices to note in the thesis) |
 | `results/` | Generated data and plots (not tracked by git) |
+
+## Pipeline of results
+
+It's a pipeline, each stage feeding the next, not an unordered pile of files:
+
+```
+abm/simulation.py        runs ONE simulation -> a SimulationResult
+        |
+        v
+analysis/*.py             turns a SimulationResult into numbers
+  prices.py                  price series (mid, or a trade price)
+  hurst.py                   Hurst exponent, from RMS price changes
+  returns.py                 return-distribution histograms
+  depth_profile.py           depth profile + its lognormal fit
+        |
+        v
+experiments/fig2.py       runs MANY simulations (parallel, resumable),
+                           calls analysis/*.py on each, saves results/*.pkl
+        |
+        v
+experiments/plot_fig2.py  reads a saved .pkl, draws the figure
+```
+
+New to the code? Read `abm/orderbook.py` first (what one order book does), then
+`abm/agents.py` and `abm/simulation.py` (what runs on top of it), then whichever
+`analysis/*.py` file matches what you're trying to measure. `experiments/` only
+orchestrates those pieces at scale — there's no separate logic to learn there.
 
 ## Running things
 
@@ -31,8 +58,10 @@ python -m tests.test_simulation
 python -m tests.test_hurst
 python -m tests.test_returns
 python -m tests.test_prices
+python -m tests.test_depth_profile
 python -m tests.test_provenance
 python -m tests.test_checkpoint
+python -m tests.test_fig2
 ```
 
 A single simulation with the paper's Fig. 2 parameters (short run):

@@ -69,6 +69,17 @@ def load_parts(parts_dir: Path) -> Dict[Tuple, dict]:
     return runs
 
 
+def _equal(a: Any, b: Any) -> bool:
+    """Equality that also works for dicts that may contain numpy arrays (nested, e.g. one array
+    of bin edges per price definition), where plain == either raises or is wrong for arrays."""
+    if isinstance(a, dict) or isinstance(b, dict):
+        return isinstance(a, dict) and isinstance(b, dict) and a.keys() == b.keys() \
+            and all(_equal(a[k], b[k]) for k in a)
+    if isinstance(a, np.ndarray) or isinstance(b, np.ndarray):
+        return np.array_equal(a, b)
+    return a == b
+
+
 def check_compatible(saved: dict, current: dict, keys: Iterable[str], allow_code_change: bool = False) -> None:
     """Raise ValueError unless saved runs can be safely combined with new ones: the settings named
     in `keys` must match exactly, and the code version (git commit) must be the same unless
@@ -76,8 +87,7 @@ def check_compatible(saved: dict, current: dict, keys: Iterable[str], allow_code
     experiment can be extended with more seeds."""
     for key in keys:
         a, b = saved.get(key), current.get(key)
-        same = np.array_equal(a, b) if isinstance(a, np.ndarray) or isinstance(b, np.ndarray) else a == b
-        if not same:
+        if not _equal(a, b):
             raise ValueError(f"Cannot resume: setting {key!r} differs from the saved runs "
                              f"(saved {a!r}, now {b!r}). Mixing them would make the results meaningless.")
     saved_commit = (saved.get("git") or {}).get("commit")

@@ -130,21 +130,47 @@ Paper: 10⁶ steps, average over 50 runs. Medium trial (commit f9bae8f, mid-pric
 606 / 1212.5 / 2425. N_A=250 read H = 0.477 ± 0.008 over Δτ = 10³–10⁴, about 3 standard errors below
 0.5; may be a slow approach, recheck with 50 runs. The final number of runs is still to be chosen.
 
-**D14. Depth profile ⟨N(p − p_m)⟩. [Assumed]**
+**D14. Depth profile ⟨N(p − p_m)⟩ and its lognormal fit. [Assumed, Checked]**
 Recorded at the end of every step over the last 10⁴ steps, N_A = 500, as resting orders per tick by
 distance from the midpoint, stored in half-tick units (the midpoint can sit on a half tick) and
-binned to 1 tick. The paper says it "can be described by a lognormal distribution"; how it was fitted
-is not stated. **[Open]** the fitting method. Our profile peaks at ≈10 orders/tick near ±35 ticks with
-a gap at the midpoint; the paper's axis reaches ≈12.
+binned to 1 tick. The paper says it "can be described by a lognormal distribution"; it gives no
+fitting procedure, and no scipy is available here, so the fit is our own (`analysis/depth_profile.py`):
+both sides are folded onto one axis (`combine_sides`, verified symmetric: 1212.2 vs 1212.8 total
+weight on the full 50-run data), then (μ, σ) come from a weighted quadratic regression of
+ln(N(x)) + ln(x) against ln(x) — exact for a lognormal density, so no iteration is needed.
+*Weighting matters a lot here and was tuned by inspection, not derived*: an unweighted regression, a
+regression weighted just by count, and an earlier method-of-moments attempt all put the fitted peak
+25–50% further from the midpoint than the data's actual peak (a method-of-moments fit on the full
+50-run data put it at 53 ticks against an actual 34–35), because those all let the noisy far tail
+pull the fit. Weighting by count² (effectively count⁴ on the squared residual, since numpy's own
+`w` parameter already applies one power) keeps the fit close to the bulk of the distribution;
+mode ≈ 36.8 ticks, peak height ≈ 9.4, both close to the data's ≈35 / ≈10 (`results/depth_fit_final.png`).
+*Also found and fixed while building this*: fitting to the folded (both-sides-combined) profile
+gives the *combined* mass at each distance; plotting that curve mirrored onto both sides of the
+book (without halving it) double-counts, since each side only has half that mass. **[Open]**
+whether the paper fits each side separately, combined as here, or some other way; and how much its
+fit actually deviates from the data (we cannot see the figure to compare fit quality, only that a
+lognormal is "phenomenological", i.e. approximate by the paper's own description).
 
-**D15. Return distributions. [Assumed]**
+**D15. Return distributions. [Assumed, Checked]**
 Price *increments* p(t+Δτ) − p(t) (not log returns), as in the paper, for Δτ = 200, 400, 800, 1600
-at N_A = 500. Plotted as |Δp| on log-log axes with log-spaced bins whose edges are placed a quarter
-tick off the half-tick price grid (otherwise bins catch uneven numbers of grid values and produce
-spurious bumps). Increments below 0.75 ticks (including zero) fall outside the bins. **[Open]** the
-paper's axis convention for panel (d) is unconfirmed. Kurtosis estimated from the binned counts:
-2.7–2.9 (Gaussian = 3), rising with Δτ, so no fat tails in the symmetric model, as the paper reports.
-This is only approximate.
+at N_A = 500. Plotted as |Δp| on log-log axes with log-spaced bin edges. Each price definition
+(D11) needs edges on its own grid: the mid-price only takes multiples of 0.5 tick, a trade price
+only takes whole ticks. Edges are placed half a grid step off every grid multiple, so each bin
+holds a whole number of grid values.
+*Bug found and fixed (commit after 2d24718):* the first version built one set of edges, sized for
+the 0.5-tick (mid-price) grid, and used it for every price definition. Applied to a trade price
+(whole ticks), alternating bins then caught one grid point or none, producing a visible zigzag in
+panel (d) for `last`/`first`/`median`/`mean` (`fig2_full.png`, spotted by the user). `mid` was
+unaffected, so panel (c), which is RMS-based, is unaffected either way. Fixed by building edges
+per price definition (`experiments/fig2.py:make_bin_edges`); guarded by
+`tests/test_fig2.py`, which includes a test that reproduces the original bug on mismatched
+edges. **Consequence: the return-distribution part of `results/fig2_full.pkl` (results format 2)
+needs a re-run; the Hurst part does not.**
+Increments below half a grid step (including zero) fall outside the bins. **[Open]** the paper's
+axis convention for panel (d) is unconfirmed. Kurtosis estimated from the binned counts (mid-price,
+pre-fix data, so unaffected): 2.7–2.9 (Gaussian = 3), rising with Δτ, so no fat tails in the
+symmetric model, as the paper reports. This is only approximate.
 
 ---
 

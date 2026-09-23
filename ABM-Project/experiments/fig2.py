@@ -46,7 +46,7 @@ from experiments.provenance import git_info, describe
 from experiments.checkpoint import (atomic_pickle, parts_dir_for, has_parts, save_meta, load_meta,
                                     save_part, load_parts, check_compatible)
 
-RESULTS_FORMAT = 2           # bump when what each run stores changes, so old files aren't mixed in
+RESULTS_FORMAT = 3           # bump when what each run stores changes, so old files aren't mixed in
 PARAMS = dict(alpha=0.15, mu=0.025, delta=0.025, lambda_=100, q_provider=0.5, q_taker=0.5)
 AGENT_COUNTS = (125, 250, 500)
 PATH_AGENTS = 250            # panel (a)
@@ -54,11 +54,30 @@ DEPTH_AGENTS = 500           # panel (b) and (d)
 DEPTH_WINDOW = 10_000        # panel (b): average depth over this many final steps
 RETURN_TAUS = (200, 400, 800, 1600)
 LAG_POINTS = 80              # number of log-spaced lags (from 1 to n_steps/10) at which RMS is stored
-# |increment| bins in ticks, log-spaced. Mid-prices live on a half-tick grid, so edges are placed
-# 0.25 tick off the grid: every bin then holds a whole number of grid values, and there are no
-# spurious bumps from bins that happen to catch more or fewer grid points.
-_half_ticks = np.unique(np.round(np.logspace(np.log10(2), np.log10(10_000), 41)))
-RETURN_BIN_EDGES = (_half_ticks - 0.5) / 2
+
+
+def make_bin_edges(grid_step: float, min_ticks: float = 1.0, max_ticks: float = 5_000.0,
+                   n_points: int = 41) -> np.ndarray:
+    """Log-spaced |increment| bin edges for a price series that only takes multiples of
+    grid_step (0.5 for the mid-price -- the average of two integer prices; 1.0 for a trade
+    price -- an actual traded, integer, price). Edges sit half a grid step off every multiple of
+    grid_step, so every bin holds exactly one grid value at the low end (and more at the high end,
+    where consecutive log-spaced points are more than one grid step apart). Using edges built for
+    the wrong grid spacing leaves alternating bins empty -- e.g. edges for the 0.5 grid, applied to
+    an integer series, catch an integer in one bin and nothing in the next -- which shows up as a
+    zigzag in the plotted distribution (this happened for the trade-price definitions in an earlier
+    version; see docs/decisions.md, D15)."""
+    min_i = max(1, round(min_ticks / grid_step))
+    max_i = round(max_ticks / grid_step)
+    idx = np.unique(np.round(np.logspace(np.log10(min_i), np.log10(max_i), n_points)))
+    return (idx - 0.5) * grid_step
+
+
+# One edge set per price definition: 0.5-tick grid for the mid-price, 1-tick grid for the trade
+# prices ("mean" isn't exactly on the 1-tick grid, since it averages several trade prices, but
+# it's not concentrated on a sparser grid either, so the 1-tick edges are a reasonable fit).
+RETURN_BIN_EDGES = {"mid": make_bin_edges(0.5),
+                    **{name: make_bin_edges(1.0) for name in ("last", "first", "median", "mean")}}
 RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
 
 
@@ -82,7 +101,7 @@ def run_one(job):
         except ValueError as error:
             raise ValueError(f"N_A={n_agents}, seed={seed}, price={name}: {error}") from error
         rms[name] = rms_at_lags(prices, taus)
-        counts[name] = {tau: return_counts(prices, tau, RETURN_BIN_EDGES, absolute=True)
+        counts[name] = {tau: return_counts(prices, tau, RETURN_BIN_EDGES[name], absolute=True)
                         for tau in RETURN_TAUS if tau < n_steps}
         if name == "mid":
             mid_path = prices

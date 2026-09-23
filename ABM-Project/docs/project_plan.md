@@ -15,10 +15,12 @@
 - Implemented the simulation loop with cancellation sweep and the α(1−δ) > μ
   stability check (`simulation.py`)
 - Implemented the Hurst estimator H(Δτ), validated on a synthetic random walk
-  (`hurst.py`), and multi-run averaging (`average_hurst.py`)
+  (`hurst.py`); multi-run averaging is now done by `experiments/fig2.py` itself
+  (an earlier standalone `average_hurst.py` did this too, more simply, before
+  the runner existed — removed once the runner fully superseded it)
 
 Code layout (see `README.md`): `abm/` (orderbook, agents, simulation), `analysis/`
-(hurst, average_hurst, returns), `experiments/` (fig2, plot_fig2), `tests/`.
+(hurst, prices, returns, depth_profile), `experiments/` (fig2, plot_fig2), `tests/`.
 Run everything from the project root with `python -m ...`.
 
 Paper: `Papers/SimpleOrderBookModelPaper.pdf` (Preis et al. 2006, EPL 75, 510).
@@ -75,9 +77,9 @@ Read directly; details below are checked against it.
    Δτ = 1 to n_steps/10 and shows the rise to the left of the minimum.
    (Results files from before this change (format 1) can't be plotted or
    extended and must be regenerated.)
-6. **Run aborts on a one-sided book** (`average_hurst.py` raises on `None`
-   mid-price). Deliberate, but a long run could hit it.
-7. **Nothing committed** since "Moved files." — commit the Phase 1 work so far.
+6. **Run aborts on a one-sided book** (`analysis/prices.py:price_series` raises
+   on a `None` mid-price). Deliberate, but a long run could hit it.
+7. ~~**Nothing committed** since "Moved files."~~ Committed; ongoing since.
 
 ---
 
@@ -95,7 +97,8 @@ against this baseline.
 2. **Reproduce Fig. 2** (symmetric, q=0.5; α=0.15, μ=0.025, δ=0.025, λ₀=100)
    - (a) Price path over 10⁶ MCS, N_A=250
    - (b) Equilibrium depth profile ⟨N(p−p_m)⟩ averaged over 10⁴ MCS, N_A=500,
-     with lognormal fit *(recording + plot done; lognormal fit still to do)*
+     with lognormal fit *(done — mode ≈37 ticks, peak ≈9.4, vs data's ≈35/≈10;
+     see `docs/decisions.md` D14 for the fitting method and its caveats)*
    - (c) H(Δτ) for N_A = 125, 250, 500 vs random walk: anti-persistent at short
      Δτ, reaching 0.5 and staying there. Paper averages 50 runs. *(done at
      10⁶ steps × 10 runs, commit f9bae8f: H = 0.23–0.28 at short lags, 0.48–0.50
