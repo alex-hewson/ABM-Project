@@ -12,6 +12,7 @@ Eq. 1). At the paper's Fig. 2 parameters the two possible orders differ by only
 """
 
 from abm.orderbook import Side
+from abm.agents import ConstantSide, BoundedRandomWalk, MeanRevertingWalk
 from abm.simulation import run_simulation, check_stability_condition
 
 
@@ -181,6 +182,49 @@ def test_depth_recording_off_by_default():
     r = run_simulation(n_agents=50, alpha=0.15, mu=0.025, delta=0.025, lambda_=100,
                        n_steps=50, seed=1)
     check("no depth data unless requested", r.depth_profile_sum == {} and r.n_depth_snapshots == 0)
+
+
+def test_a_constant_flow_reproduces_the_plain_run_exactly():
+    kwargs = dict(n_agents=60, alpha=0.15, mu=0.025, delta=0.025, lambda_=100, n_steps=300, seed=8)
+    for method in ("fast", "agents"):
+        plain = run_simulation(method=method, **kwargs)
+        flow = run_simulation(method=method, taker_flow=ConstantSide(0.5), **kwargs)
+        check(f"{method}: identical price path with a constant flow at 1/2 (no random numbers used)",
+              plain.mid_price_series == flow.mid_price_series and plain.n_trades == flow.n_trades)
+    check("the flow's q is recorded for every step", list(flow.q_taker_series) == [0.5] * 300)
+    check("no q series without a flow", len(plain.q_taker_series) == 0)
+
+
+def test_the_flows_buy_probability_reaches_the_takers():
+    for method in ("fast", "agents"):
+        r = run_simulation(n_agents=60, alpha=0.15, mu=0.025, delta=0.025, lambda_=100,
+                           n_steps=1_500, seed=5, method=method, taker_flow=ConstantSide(0.9))
+        buys = sum(t.aggressor_side is Side.BID for t in r.book.trades)
+        fraction = buys / len(r.book.trades)
+        check(f"{method}: q=0.9 gives {fraction:.3f} buy-initiated trades (within 0.04 of 0.9)",
+              abs(fraction - 0.9) < 0.04)
+
+
+def test_a_walking_flow_is_recorded_and_reproducible():
+    kwargs = dict(n_agents=60, alpha=0.15, mu=0.025, delta=0.025, lambda_=100, n_steps=400, seed=9)
+    a = run_simulation(taker_flow=BoundedRandomWalk(), **kwargs)
+    b = run_simulation(taker_flow=BoundedRandomWalk(), **kwargs)
+    q = a.q_taker_series
+    check("one q per step", len(q) == 400)
+    check("the first step uses the starting value, exactly 1/2", q[0] == 0.5)
+    check("q moves by exactly one step (0.001) between steps",
+          all(abs(abs(d) - 0.001) < 1e-12 for d in (q[1:] - q[:-1])))
+    check("q stays within the walk's bounds", q.min() >= 0.45 - 1e-9 and q.max() <= 0.55 + 1e-9)
+    check("same seed, fresh flow objects: identical q series and price path",
+          list(q) == list(b.q_taker_series) and a.mid_price_series == b.mid_price_series)
+
+
+def test_an_asymmetric_flow_still_gives_a_working_book():
+    for flow in (BoundedRandomWalk(), MeanRevertingWalk()):
+        r = run_simulation(n_agents=100, alpha=0.15, mu=0.025, delta=0.025, lambda_=100,
+                           n_steps=2_000, seed=6, taker_flow=flow)
+        check(f"{type(flow).__name__}: no empty-book failures and trades happen",
+              r.n_match_failures == 0 and r.n_trades > 0)
 
 
 if __name__ == "__main__":

@@ -34,7 +34,7 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from abm.orderbook import OrderBook, Side, OrderResult
-from abm.agents import LiquidityProvider, LiquidityTaker
+from abm.agents import LiquidityProvider, LiquidityTaker, SideProbability
 
 
 @dataclass
@@ -64,6 +64,10 @@ class SimulationResult:
     # for steps with no trade. Filled only if run_simulation(record_trade_prices=True). The median of an
     # even number of trades is the upper of the two middle values. See analysis/prices.py.
     trade_price_steps: Dict[str, np.ndarray] = field(default_factory=dict)
+
+    # The buy probability q_taker used by that step's takers, one entry per step. Filled only if
+    # run_simulation was given a taker_flow (asymmetric order flow); empty otherwise.
+    q_taker_series: np.ndarray = field(default_factory=lambda: np.empty(0))
 
 
 def _accumulate_depth(book: OrderBook, depth_sum: Dict[int, int]) -> int:
@@ -118,6 +122,7 @@ def run_simulation(
     method: str = "fast",
     keep_trades: bool = True,
     record_trade_prices: bool = False,
+    taker_flow: Optional[SideProbability] = None,
 ) -> SimulationResult:
     """
     Run the base Preis et al. model for n_steps, after a pre-opening
@@ -146,6 +151,12 @@ def run_simulation(
     keep_trades=False stops the book keeping a Trade object per trade, which
     saves a lot of memory in long runs (result.book.trades is then empty;
     result.n_trades still counts the trades).
+
+    taker_flow (see agents.py) makes the takers' buy probability a shared, time-varying value
+    (asymmetric order flow, paper Fig. 3) instead of the fixed q_taker, which is then ignored. Each
+    step's takers use taker_flow.q; it then advances, so the first step uses its starting value
+    (1/2). The values used are returned in result.q_taker_series. Pass a fresh flow object per run. 
+    (Don't use the same one between simulations, as will start in different places)
     """
     if method not in ("fast", "agents"):
         raise ValueError(f"method must be 'fast' or 'agents', got {method!r}")
@@ -191,17 +202,19 @@ def run_simulation(
                     if rng.random() < delta:
                         book.cancel_order(order_id)
 
-    def takers_act(t: int) -> int:
+    def takers_act(t: int, q: Optional[float]) -> int:
         """Returns the number of market orders that found an empty book.
-        Also submits the takers orders, under normal conditions failures should stay 0"""
+        Also submits the takers orders, under normal conditions failures should stay 0.
+        q, if not None, is this step's shared buy probability (asymmetric flow); None means
+        each taker uses its own fixed q_taker."""
         failures = 0
         if fast:
             for i in rng.sample(range(n_agents), rng.binomialvariate(n_agents, mu)):
-                if takers[i].submit(book, t, rng) is OrderResult.NO_MATCH:
+                if takers[i].submit(book, t, rng, q_taker=q) is OrderResult.NO_MATCH:
                     failures += 1
         else:
             for taker in takers:
-                if taker.maybe_submit(book, timestamp=t, rng=rng) is OrderResult.NO_MATCH:
+                if taker.maybe_submit(book, timestamp=t, rng=rng, q_taker=q) is OrderResult.NO_MATCH:
                     failures += 1
         return failures
 
@@ -217,16 +230,21 @@ def run_simulation(
     n_match_failures = 0
     depth_sum: Dict[int, int] = {}
     n_depth_snapshots = 0
+    q_taker_series = np.empty(n_steps) if taker_flow is not None else np.empty(0)
 
     for t in range(pre_opening_steps, pre_opening_steps + n_steps):
+        step = t - pre_opening_steps
         providers_act(t)                        # 1. Providers act
         cancellation_sweep()                    # 2. Each resting order removed w.p. delta
-        n_match_failures += takers_act(t)       # 3. Takers act
+        q_now = taker_flow.q if taker_flow is not None else None
+        n_match_failures += takers_act(t, q_now)    # 3. Takers act
+        if taker_flow is not None:
+            q_taker_series[step] = q_now
+            taker_flow.advance(rng)             # next step's value; step 0 used the starting value
 
         mid_price_series.append(book.mid_price())
         total_orders_series.append(book.total_orders())
 
-        step = t - pre_opening_steps
         if record_trade_prices and step_trade_prices:
             trade_price_steps["first"][step] = step_trade_prices[0]
             trade_price_steps["last"][step] = step_trade_prices[-1]
@@ -246,6 +264,7 @@ def run_simulation(
         depth_profile_sum=depth_sum,
         n_depth_snapshots=n_depth_snapshots,
         trade_price_steps=trade_price_steps,
+        q_taker_series=q_taker_series,
     )
 
 

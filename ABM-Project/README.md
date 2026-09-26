@@ -11,7 +11,7 @@ Current status and next steps are in [docs/project_plan.md](docs/project_plan.md
 
 | Folder | Contents |
 |---|---|
-| `abm/` | The model: `orderbook.py` (matching engine), `agents.py` (liquidity providers / takers), `simulation.py` (step loop, runs agents through orderbook) |
+| `abm/` | The model: `orderbook.py` (matching engine), `agents.py` (liquidity providers / takers, and the asymmetric order-flow processes), `simulation.py` (step loop, runs agents through orderbook) |
 | `analysis/` | Measurements on one simulation's output: `prices.py` (price series), `hurst.py` (Hurst exponent), `returns.py` (return distributions), `depth_profile.py` (depth profile + lognormal fit) |
 | `experiments/` | Scripts that reproduce the paper's figures: `fig2.py` (run many simulations + save), `plot_fig2.py` (draw from saved data); `checkpoint.py` and `provenance.py` are support code these two use, not called directly |
 | `tests/` | One test file per file above — twice the file count, but nothing beyond what it tests |
