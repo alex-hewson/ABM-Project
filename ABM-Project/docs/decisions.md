@@ -1,19 +1,20 @@
 # Decisions and assumptions log
 
-Things that will need explaining or defending when the thesis is written: every point where the
-paper (Preis, Golke, Paul & Schneider 2006, *EPL* 75, 510) was silent or ambiguous, every
-implementation choice that could change results, and how each was checked. Keep this up to date
-as the project goes on; it is meant to be raided for the methodology chapter.
+Methodology decisions taken during the course of the project: what was done, why, and the
+evidence behind it. For what is done and what comes next, see `project_plan.md`.
 
-Status tags: **[Paper]** taken from the paper · **[Assumed]** our choice, paper silent ·
-**[Checked]** verified against theory or tests · **[Open]** not yet decided.
+**[Paper]** = taken from the paper · **[Assumed]** = Paper unclear, so need to make own decision ·
+**[Checked]** = verified against theory or tests · **[Open]** = not yet decided.
 
-Numbers quoted are from the runs named; see `results/` (not tracked by git) and the code version
+Decision numbers (D1, D2, ...) are fixed IDs in order of creation, not positions in this file, so
+references to them from code comments stay valid when entries are moved.
+
+Numbers quoted are from the runs named; see `results/` and the code version
 recorded inside each results file.
 
 ---
 
-## 1. Model specification
+## 1. Model
 
 **D1. Base model and parameters. [Paper]**
 Providers place limit orders (rate α, exponential depth λ₀ around the midpoint), takers place
@@ -22,26 +23,27 @@ price-time priority. Fig. 2 parameters: α=0.15, μ=0.025, δ=0.025, λ₀=100, 
 N_A = 125/250/500. Stability requires α(1−δ) > μ and δ > 0 (Eq. 1–3); the code refuses to run otherwise.
 
 **D2. One "MCS" = one simulation step; agents are independent per step. [Assumed]**
-The paper never defines an MCS precisely. We take it to be one step in which every provider
-independently acts with probability α and every taker with probability μ (so about αN_A limit
-orders and μN_A market orders per step, as Eq. 1 requires).
+The paper uses the term MCS (Monte Carlo step) without defining it. It is taken to be one step in
+which every provider independently acts with probability α and every taker with probability μ, which
+gives the αN_A limit orders and μN_A market orders per step that Eq. 1 requires.
 
 **D3. Order of events within a step: providers → cancellation → takers. [Assumed, Checked]**
-Not stated in the text, but implied by Eq. 1, N(t+1) = (N+αN_A)(1−δ) − μN_A. An earlier version
-did providers → takers → cancellation. At the Fig. 2 parameters the two orders differ by only
-0.5% in equilibrium depth, so tests use faster parameters (α=0.3, μ=0.1, δ=0.2) where Eq. 2
-predicts 175 orders and the swapped order would give 200; the simulation gives ≈175
-(`tests/test_simulation.py`, verified to fail if the order is swapped).
-*Consequence:* the price recorded at the end of a step is read just after the takers have acted
-and before providers replenish the book. This matters for short-lag results (see D12).
+Not stated in the text, but implied by Eq. 1, N(t+1) = (N+αN_A)(1−δ) − μN_A.
+Checked in `tests/test_simulation.py`: at test parameters α=0.3, μ=0.1, δ=0.2, Eq. 2 predicts 175
+resting orders and the simulation gives ≈175, while the swapped order would give 200 (at the Fig. 2
+parameters the two orders differ by only 0.5%, too little to tell apart).
+The price recorded at the end of a step is read just after the takers have acted
+and before providers replenish the book. This matters for short-lag results (see D11).
 
 **D4. Cancellation applies to every resting order, including ones placed in the same step.
 [Assumed, follows Eq. 1]** Each is removed independently with probability δ.
 
 **D5. Entry depth: exponential with mean λ₀, rounded to the nearest tick; reference price is the
 midpoint, or a fallback (the start price) while the book has no midpoint. [Assumed]**
-The paper says "exponentially distributed" and "around the midpoint". Rounding rule and the
-fallback are ours. The fallback only matters during the pre-opening.
+The paper says "exponentially distributed" and "around the midpoint", but gives no rounding rule.
+Prices are rounded to whole ticks. When there is no midpoint, the start price p(t₀) = 10⁶ is used,
+the middle of the paper's 2×10⁶-tick book. In practice the fallback only matters during the
+pre-opening; it would also apply if one side of the book emptied mid-run, which has not happened.
 
 **D6. Marketable limit orders execute immediately at the resting order's price. [Paper, Assumed]**
 The paper says limit orders execute "at the assigned limit or some better price". With unit orders,
@@ -49,8 +51,38 @@ a crossing limit order consumes one resting order. Provider orders rarely cross 
 the midpoint), so this hardly affects results.
 
 **D7. Pre-opening: 10 provider-only steps around p(t₀) = 10⁶. Prices are unbounded integers.
-[Paper, Assumed]** The paper uses a book with 2×10⁶ price ticks; we do not bound the tick grid.
+[Paper, Assumed]** The paper uses a book with 2×10⁶ price ticks; the tick grid here is not bounded.
 Prices stay within a few thousand ticks of the start, so this should not matter.
+
+### Asymmetric order flow (paper Fig. 3; `abm/agents.py`, `taker_flow` in `run_simulation`)
+
+**D16. One market-wide q_taker(t), shared by every taker in a step; q_provider is left alone.
+[Paper, Assumed]** The paper describes "a random walk of the variable q_taker", a single variable, so all
+takers in a step use the same buy probability and a temporary imbalance (a "trend") builds up. Each
+taker's own `q_taker` is overridden by the current shared value. The paper also says the results are
+unchanged if q_provider is perturbed instead; that variant is **not implemented** (open).
+
+**D17. Timing: takers use the current q, then q moves to its next value. [Assumed]** So the first
+recorded step uses exactly q = 1/2 (the paper's q(t₀) = 1/2), and the pre-opening steps do not advance
+it. Providers and cancellation are unaffected (they don't use q_taker). The q used at every step is
+saved in `result.q_taker_series`, which Eq. 4 will need.
+
+**D18. Bounded random walk (Fig. 3a): ±Δs with equal probability, reflected at 1/2 ± S by mirroring.
+[Paper, Assumed]** Paper values Δs = 0.001, S = 0.05. "Reflecting boundary" is not defined in the
+paper; this model mirrors a step that would leave the range back inside (k = K+1 becomes K−1, so from the bound
+the walk always steps inward). The other natural reading, a blocked step that leaves q at the bound,
+differs only in how much time is spent exactly at the bound; whether that matters is untested.
+q is stored as an integer count of steps from 1/2 (q = 1/2 + k·Δs) so "at the centre" and "at a bound"
+are exact comparisons, and S must be a whole multiple of Δs (otherwise an error).
+
+**D19. Mean-reverting walk (Fig. 3c): moves toward 1/2 with probability 1/2 + |q − 1/2|, else away.
+[Paper, Assumed tie-break, Checked]** Paper values Δs = 0.001, S = 1/2 (so q may range over [0, 1]).
+At exactly q = 1/2 there is no "toward", so a fair coin is used (the paper doesn't say). *Derived, and
+verified by test and simulation:* this is a discrete Ornstein–Uhlenbeck process. The average pull is
+2Δs·(q − 1/2) per step, so q settles to a standard deviation of √(Δs/4) = 0.0158 (simulated: 0.0150,
+`tests/test_agents.py` checks it within 15%) and forgets its history over about 1/(2Δs) = 500 steps.
+Consequences: the S = 1/2 bound is effectively never reached, and 500 steps is the time scale that
+should set the window in which H > 1/2 (to be compared with Fig. 3c when reproduced).
 
 ---
 
@@ -68,47 +100,50 @@ identical and independent. Cost fell from ≈0.9 to ≈0.25 ms per step (N_A=250
 the book cannot be aggregated, so Phase 2 will need a per-agent loop for them.
 
 **D9. Reproducibility. [Checked]**
-Python `random.Random` (Mersenne Twister), seeds 0…n−1 per (N_A, run). Every results file records
+Python `random.Random`, seeds 0…n−1 per (N_A, run). Every results file records
 the git commit, branch and whether the working tree was clean (`experiments/provenance.py`).
 Environment for the reported runs: Python 3.14.6, numpy 2.5.0, matplotlib 3.11.0 on an Intel
 i5-8365U laptop (4 cores / 8 threads). The fast method needs Python ≥ 3.12 (`random.binomialvariate`).
 
-**D10. A book with an empty side aborts a run instead of being patched. [Assumed]**
-If the midpoint is undefined at any step the run raises an error naming the seed, instead of
-interpolating. Reason: for an instability study, "the book went one-sided" is itself an event that
-should be seen. Not triggered in any run so far (0 empty-book failures in all N_A).
+**D10. A book with an empty side aborts a Fig. 2 run instead of being patched. [Assumed]**
+`run_simulation` itself records `None` as the mid-price for any step with an empty side and carries
+on. `experiments/fig2.py` then refuses that run: building the price series raises an error naming the
+seed, so a one-sided book stops the experiment rather than being interpolated over. Reason: for an
+instability study, "the book went one-sided" is itself an event that should be seen. Not triggered in
+any run so far (0 empty-book failures in all 150 runs of `fig2_final.pkl`).
 
 ---
 
 ## 3. Measurement choices
 
-**D11. Which "price"? [OPEN. The single most important pending decision]**
-The paper says "price" without saying whether it means the mid-price or a trade price. In our
+**D11. Which "price"? [Assumed: median trade price per step, adopted for the reported results]**
+The paper says "price" without saying whether it means the mid-price or a trade price. In this
 step-based model the answer changes the Hurst exponent at short lags substantially, because a trade
 price "bounces" between bid and ask. Long-lag behaviour (H → 0.5) is the same for all.
 
-Readings taken from the paper's Fig. 2c by eye (by the user, not by overlay): lowest H ≈ 0.08 near
+Readings taken from the paper's Fig. 2c by eye: lowest H ≈ 0.08 near
 Δτ ≈ 10, curve higher to the left; H(100) ≈ 0.22–0.25; reaches ≈ 0.5 at Δτ ≈ 10³–10⁴;
 N_A = 500 is the lowest curve.
 
-Minimum of H(Δτ) for Δτ ≤ 100, N_A = 250 / 500 (2 seeds, 10⁵ steps, single runs, ±0.005):
+Five definitions compared on the paper-scale run (`fig2_final.pkl`, commit 393cdee: 10⁶ steps,
+50 runs per N_A), values for N_A = 125 / 250 / 500:
 
-| Price definition | min H | H(100) |
-|---|---|---|
-| last trade in step | 0.03 / 0.02 | 0.15 / 0.11 |
-| random trade in step | 0.05 / 0.04 | 0.18 / 0.16 |
-| **median trade in step** | **0.08 / 0.07** | **0.20–0.22 / 0.19–0.20** |
-| **first trade in step** | **0.086 / 0.088** | **0.22–0.23 / 0.22** |
-| mean of the step's trades | 0.13 / 0.12 | 0.27 / 0.26 |
-| mid-price | 0.22 / 0.21 | 0.34 / 0.34 |
+| Price definition | lowest H (Δτ ≤ 200) | H(100) | first reaches H ≥ 0.48 at Δτ ≈ |
+|---|---|---|---|
+| last trade in step | 0.048 / 0.032 / 0.022 | 0.19 / 0.15 / 0.11 | 4,700–15,000 |
+| **median trade in step** | **0.082 / 0.084 / 0.081** | **0.23 / 0.21 / 0.19** | **4,100–6,300** |
+| first trade in step | 0.087 / 0.095 / 0.096 | 0.24 / 0.23 / 0.22 | 4,100–6,300 |
+| mean of the step's trades | 0.127 / 0.140 / 0.133 | 0.28 / 0.28 / 0.26 | 2,300–2,600 |
+| mid-price | 0.266 / 0.237 / 0.216 | 0.38 / 0.35 / 0.33 | 700–1,500 |
 
-Median and first-trade match the readings; "median" also gives the right N_A ordering; last-trade
-is too low; the mid-price is far too high. **This is calibrating an unspecified detail, not a
-finding**, and the match rests on three rough readings of a figure. Whatever is chosen must be
-reported as "the paper does not state its price definition; we use X because it reproduces the
-short-lag behaviour of Fig. 2c". The runner now stores all five definitions
-(`analysis/prices.py`), and `plot_fig2.py` draws a comparison, so the choice can be made after the
-full run.
+Median and first-trade both match the readings for the minimum and H(100). Only median also gives
+the paper's ordering, with N_A = 500 lowest at the minimum (by a small margin); first-trade puts
+N_A = 500 highest. Last-trade is too low and the mid-price far too high. The median trade price is
+therefore used for the reported Fig. 2 (`results/fig2_final.png`). **This is calibrating an
+unspecified detail, not a finding**, and the match rests on a few rough readings of a figure.
+It must be reported as "the paper does not state its price definition; the median trade price per
+step is used because it reproduces the short-lag behaviour of Fig. 2c". All five definitions remain
+stored in every results file (`analysis/prices.py`), so the comparison can be redrawn.
 *Why the definition matters here:* takers act in one block at the end of a step, so the last trade
 of a step comes when the book is most depleted and the first trade comes right after replenishment.
 The paper's own update scheme is probably different and is not specified (see D3).
@@ -124,19 +159,26 @@ gives ≈ 0.5 (`tests/test_hurst.py`). The earlier estimator dropped the end lag
 started at Δτ = 14 and ended near 7×10⁴; this hid the rise of H to the left of its minimum.
 Long lags are noisy: few independent windows remain at Δτ ≳ 10⁴.
 
-**D13. Scale and averaging. [Paper, Assumed]**
-Paper: 10⁶ steps, average over 50 runs. Medium trial (commit f9bae8f, mid-price, old estimator):
-10⁶ steps × 10 runs per N_A, ≈1 hour. Results: mean book size 606 / 1212 / 2425 orders vs Eq. 2's
-606 / 1212.5 / 2425. N_A=250 read H = 0.477 ± 0.008 over Δτ = 10³–10⁴, about 3 standard errors below
-0.5; may be a slow approach, recheck with 50 runs. The final number of runs is still to be chosen.
+**D13. Scale and averaging. [Paper, Checked]**
+As in the paper: 10⁶ steps, averaged over 50 runs per N_A. The reported Fig. 2 is `fig2_final.pkl`
+(commit 393cdee, clean working tree, 150 runs, 0 empty-book failures). Mean book sizes are
+606 / 1212 / 2425 orders against Eq. 2's 606 / 1212.5 / 2425.
+*Approach to H = 0.5:* averaged over Δτ = 10³–10⁴, H is 0.492 / 0.487 / 0.488 (mid-price) and
+0.477 / 0.469 / 0.468 (median) for N_A = 125 / 250 / 500, each ± 0.003–0.004 (standard error over
+50 runs). This is significantly below 0.5 for every N_A, so it is not noise: H is still rising
+through that window and only reaches ≈ 0.5 near Δτ ≈ 10⁴ (the median curve first passes 0.48 at
+Δτ ≈ 4,100–6,300). This is consistent with the reading of the paper's Fig. 2c (H reaches ≈ 0.5 at
+Δτ ≈ 10³–10⁴). An earlier 10-run trial (commit f9bae8f) had shown the same effect for N_A = 250 only,
+at the edge of its noise.
 
 **D14. Depth profile ⟨N(p − p_m)⟩ and its lognormal fit. [Assumed, Checked]**
 Recorded at the end of every step over the last 10⁴ steps, N_A = 500, as resting orders per tick by
 distance from the midpoint, stored in half-tick units (the midpoint can sit on a half tick) and
-binned to 1 tick. The paper says it "can be described by a lognormal distribution"; it gives no
-fitting procedure, and no scipy is available here, so the fit is our own (`analysis/depth_profile.py`):
+binned to 1 tick. The paper says it "can be described by a lognormal distribution" but gives no
+fitting procedure, and scipy is not installed, so the fit method here is not the paper's
+(`analysis/depth_profile.py`):
 both sides are folded onto one axis (`combine_sides`, verified symmetric: 1212.2 vs 1212.8 total
-weight on the full 50-run data), then (μ, σ) come from a weighted quadratic regression of
+weight on the 50-run data), then (μ, σ) come from a weighted quadratic regression of
 ln(N(x)) + ln(x) against ln(x) — exact for a lognormal density, so no iteration is needed.
 *Weighting matters a lot here and was tuned by inspection, not derived*: an unweighted regression, a
 regression weighted just by count, and an earlier method-of-moments attempt all put the fitted peak
@@ -144,13 +186,14 @@ regression weighted just by count, and an earlier method-of-moments attempt all 
 50-run data put it at 53 ticks against an actual 34–35), because those all let the noisy far tail
 pull the fit. Weighting by count² (effectively count⁴ on the squared residual, since numpy's own
 `w` parameter already applies one power) keeps the fit close to the bulk of the distribution;
-mode ≈ 36.8 ticks, peak height ≈ 9.4, both close to the data's ≈35 / ≈10 (`results/depth_fit_final.png`).
+mode ≈ 36.8 ticks, peak height ≈ 9.4, both close to the data's ≈35 / ≈10 (`results/fig2_final.png`,
+panel b).
 *Also found and fixed while building this*: fitting to the folded (both-sides-combined) profile
 gives the *combined* mass at each distance; plotting that curve mirrored onto both sides of the
 book (without halving it) double-counts, since each side only has half that mass. **[Open]**
 whether the paper fits each side separately, combined as here, or some other way; and how much its
-fit actually deviates from the data (we cannot see the figure to compare fit quality, only that a
-lognormal is "phenomenological", i.e. approximate by the paper's own description).
+fit deviates from its data (the paper's figure has not been compared directly for fit quality; the
+paper itself calls the lognormal description "phenomenological", i.e. approximate).
 
 **D15. Return distributions. [Assumed, Checked]**
 Price *increments* p(t+Δτ) − p(t) (not log returns), as in the paper, for Δτ = 200, 400, 800, 1600
@@ -158,19 +201,19 @@ at N_A = 500. Plotted as |Δp| on log-log axes with log-spaced bin edges. Each p
 (D11) needs edges on its own grid: the mid-price only takes multiples of 0.5 tick, a trade price
 only takes whole ticks. Edges are placed half a grid step off every grid multiple, so each bin
 holds a whole number of grid values.
-*Bug found and fixed (commit after 2d24718):* the first version built one set of edges, sized for
+*Bug found and fixed (commit 393cdee):* the first version built one set of edges, sized for
 the 0.5-tick (mid-price) grid, and used it for every price definition. Applied to a trade price
 (whole ticks), alternating bins then caught one grid point or none, producing a visible zigzag in
 panel (d) for `last`/`first`/`median`/`mean` (`fig2_full.png`, spotted by the user). `mid` was
-unaffected, so panel (c), which is RMS-based, is unaffected either way. Fixed by building edges
+unaffected, and panel (c), which is RMS-based, is unaffected either way. Fixed by building edges
 per price definition (`experiments/fig2.py:make_bin_edges`); guarded by
 `tests/test_fig2.py`, which includes a test that reproduces the original bug on mismatched
-edges. **Consequence: the return-distribution part of `results/fig2_full.pkl` (results format 2)
-needs a re-run; the Hurst part does not.**
+edges. The affected results were regenerated in `fig2_final.pkl` (the Hurst values in it are
+identical to the earlier run's, as expected, since the simulation code did not change).
 Increments below half a grid step (including zero) fall outside the bins. **[Open]** the paper's
-axis convention for panel (d) is unconfirmed. Kurtosis estimated from the binned counts (mid-price,
-pre-fix data, so unaffected): 2.7–2.9 (Gaussian = 3), rising with Δτ, so no fat tails in the
-symmetric model, as the paper reports. This is only approximate.
+axis convention for panel (d) is unconfirmed. Kurtosis estimated from the binned counts (mid-price):
+2.7–2.9 (Gaussian = 3), rising with Δτ, so no fat tails in the symmetric model, as the paper reports.
+This is only approximate.
 
 ---
 
@@ -178,17 +221,22 @@ symmetric model, as the paper reports. This is only approximate.
 
 - The paper's *figures* have not been overlaid. Only its text was read programmatically; comparisons to
   Fig. 2 rest on the user's readings of the PDF. An overlay or digitised curves would be stronger.
-- Reproduced (qualitatively): price-path scale (±1000 ticks in 10⁶ steps), depth profile shape,
-  anti-persistent H at short lags rising to ≈ 0.5, Gaussian return distributions.
-- Not yet reproduced or checked: exact short-lag H (D11), the lognormal fit, Figs. 3 and 4.
+- **Fig. 2, reproduced qualitatively at paper scale** (`fig2_final.png`, 10⁶ steps, 50 runs per N_A):
+  price-path scale (±1000 ticks in 10⁶ steps), depth profile shape and its lognormal fit (D14),
+  H(Δτ) anti-persistent at short lags with its minimum ≈ 0.08 near Δτ ≈ 10 and rising to ≈ 0.5 by
+  Δτ ≈ 10⁴ (with the median trade price, D11), and Gaussian return distributions.
+- Not yet reproduced or checked: Fig. 4.
+- Fig. 3, first look only (single runs, N_A = 250, 10⁵ steps, seed 0; see D16–D19). Bounded walk: H rises
+  to 0.84–0.86 near Δτ ≈ 10³ and falls back toward 0.5 by 10⁴ (paper: "up to 0.9", then H = 1/2).
+  Mean-reverting walk: H peaks at 0.57–0.59 near Δτ ≈ 3×10³ (paper: "closer to experimental
+  behaviour", real markets ≲ 0.6). Encouraging but not a reproduction: one short run each, no averaging
+  over runs, and the return distributions (bimodal for 3a, Gaussian for 3c) are unchecked.
 
-## 5. To decide later
+## 5. Still open
 
-- **Price definition** (D11), then re-run at the chosen scale.
-- **Lognormal fit** for the depth profile (D14).
-- **Asymmetric flow (Fig. 3):** the bounded random walk's reflecting boundary at ½ ± S and the
-  mean-reverting step probability ½ + |q − ½| are described in words; the exact implementation
-  (what "reflecting" does at the boundary, whether q_taker is shared by all takers each step) is ours.
+- **Depth-profile fit (D14):** whether the paper fits each side separately or combined.
+- **Asymmetric flow (D16, D18):** the q_provider variant the paper mentions, and whether mirror vs
+  blocked reflection matters.
 - **Eq. 4 (volatility-coupled depth):** ⟨(q_taker − ½)²⟩ is "determined separately before the main
   simulation"; the paper gives no procedure, so the calibration run must be designed and documented.
-- **Number of runs** for the final baseline, and tagging it (`baseline-v1`) as the control model.
+- **Baseline tag:** tagging the finished baseline (`baseline-v1`) as the control model.
