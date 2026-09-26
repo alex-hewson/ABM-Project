@@ -17,13 +17,14 @@ repository in OneDrive `Work/ABM/Papers/`).
 - Hurst exponent H(Δτ) (D12), return distributions (D15), depth profile with lognormal fit (D14)
 - **Fig. 2 reproduced qualitatively at paper scale**: `results/fig2_final.pkl` / `.png`,
   10⁶ steps, 50 runs per N_A, commit 393cdee (D11, D13)
-- Asymmetric order flow, model side: shared, time-varying q_taker, bounded and mean-reverting
-  walks (D16–D19), on branch `fig3-asymmetric-flow`
+- Asymmetric order flow: shared, time-varying q_taker, bounded and mean-reverting walks (D16–D19)
+- One experiment runner and one plotter for both figures (`experiments/run.py --flow ...`,
+  `experiments/plot.py fig2|fig3`); Fig. 3 trial at 10⁵ steps matches the paper qualitatively (D20)
 
 Code layout and how to run things: see `README.md`.
 
-**Git:** `main` is still at the reorganisation commit. The finished Fig. 2 baseline exists only on
-`speedup-loop` (393cdee), and the Fig. 3 model work on `fig3-asymmetric-flow`, which branches from it.
+**Git:** `main` holds the finished Fig. 2 baseline (393cdee). Fig. 3 work is on `fig3-asymmetric-flow`,
+to be merged into `main` once Fig. 3 is reproduced.
 
 ## Open questions
 Each is described in `decisions.md`:
@@ -49,9 +50,9 @@ This is the methodological foundation — everything built later is compared aga
    - (c) H(Δτ) for N_A = 125, 250, 500: minimum ≈ 0.08 near Δτ ≈ 10, rising to ≈ 0.5 by
      Δτ ≈ 10⁴ (D11, D13)
    - (d) Return distributions for Δτ = 200, 400, 800, 1600, N_A=500: no fat tails (D15)
-3. **Add asymmetric order flow (Fig. 3)** — model done (D16–D19); **still to do:** the experiment
-   (many seeds; H(Δτ) for N_A = 125/250/500; return distributions for N_A=500) and its plots.
-   First single-run looks are in `decisions.md`, section 4.
+3. **Add asymmetric order flow (Fig. 3)** — model, runner and plot done (D16–D20); a trial
+   (10⁵ steps, 4 runs per N_A) matches the paper qualitatively (`decisions.md`, section 4).
+   **Still to do:** the two paper-scale runs (10⁶ steps, 50 runs per N_A, about 5–6 hours each).
    - 3a. Bounded random walk (Δs=0.001, S=0.05): expect H up to ≈ 0.9 at medium Δτ and bimodal returns
    - 3c. Mean-reverting walk (Δs=0.001, S=½): expect H closer to real markets (≲ 0.6) and ≈ Gaussian
      returns
@@ -129,8 +130,7 @@ Test regulatory levers against the model, following Jacob Leal & Napoletano:
 
 ## Immediate next steps
 
-1. Commit the Fig. 3 model work on `fig3-asymmetric-flow`.
-2. Merge `speedup-loop` into `main`, so the finished Fig. 2 baseline is on the main branch.
-3. Build the Fig. 3 experiment by generalising the Fig. 2 runner to accept an order-flow process,
-   rather than copying it into a second runner.
+1. Commit the runner/plotter generalisation on `fig3-asymmetric-flow`.
+2. Run the two paper-scale Fig. 3 experiments (commands in `README.md`), one per night, then plot.
+3. If Fig. 3 is reproduced, merge `fig3-asymmetric-flow` into `main`.
 4. Then Eq. 4 / Fig. 4, and tag `baseline-v1` once Figs. 2–4 are reproduced.

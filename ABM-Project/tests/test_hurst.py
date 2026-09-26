@@ -6,7 +6,7 @@ The estimator is checked against series where the answer is known exactly
 one hand-worked RMS calculation.
 
 Multi-run averaging of H(delta tau) is not tested here: it's done by
-experiments/fig2.py itself now (an earlier standalone analysis/average_hurst.py
+experiments/run.py itself now (an earlier standalone analysis/average_hurst.py
 did this before the runner existed; removed once the runner superseded it --
 see docs/project_plan.md).
 """

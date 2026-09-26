@@ -5,7 +5,8 @@ An agent-based model of a limit order book, built on Preis, Golke, Paul & Schnei
 reproduce that paper as a validated baseline, then extend it with high-frequency trading
 agents to study market instability (e.g. the May 2010 Flash Crash).
 
-Current status and next steps are in [docs/project_plan.md](docs/project_plan.md).
+Current status and next steps are in [docs/project_plan.md](docs/project_plan.md); the reasoning
+behind each modelling and measurement choice is in [docs/decisions.md](docs/decisions.md).
 
 ## Layout
 
@@ -13,14 +14,14 @@ Current status and next steps are in [docs/project_plan.md](docs/project_plan.md
 |---|---|
 | `abm/` | The model: `orderbook.py` (matching engine), `agents.py` (liquidity providers / takers, and the asymmetric order-flow processes), `simulation.py` (step loop, runs agents through orderbook) |
 | `analysis/` | Measurements on one simulation's output: `prices.py` (price series), `hurst.py` (Hurst exponent), `returns.py` (return distributions), `depth_profile.py` (depth profile + lognormal fit) |
-| `experiments/` | Scripts that reproduce the paper's figures: `fig2.py` (run many simulations + save), `plot_fig2.py` (draw from saved data); `checkpoint.py` and `provenance.py` are support code these two use, not called directly |
+| `experiments/` | Reproducing the paper's figures: `run.py` (runs many simulations and saves the results), `plot.py` (draws Fig. 2 or Fig. 3 from saved results); `checkpoint.py` and `provenance.py` are support code these two use, not called directly |
 | `tests/` | One test file per file above — twice the file count, but nothing beyond what it tests |
 | `docs/` | `project_plan.md` (status and next steps), `decisions.md` (assumptions and choices to note in the thesis) |
 | `results/` | Generated data and plots (not tracked by git) |
 
 ## Pipeline of results
 
-It's a pipeline, each stage feeding the next, not an unordered pile of files:
+It is a pipeline, each stage feeding the next, not an unordered pile of files:
 
 ```
 abm/simulation.py        runs ONE simulation -> a SimulationResult
@@ -33,36 +34,29 @@ analysis/*.py             turns a SimulationResult into numbers
   depth_profile.py           depth profile + its lognormal fit
         |
         v
-experiments/fig2.py       runs MANY simulations (parallel, resumable),
+experiments/run.py        runs MANY simulations (parallel, resumable),
                            calls analysis/*.py on each, saves results/*.pkl
         |
         v
-experiments/plot_fig2.py  reads a saved .pkl, draws the figure
+experiments/plot.py       reads saved .pkl files, draws a figure
 ```
 
-New to the code? Read `abm/orderbook.py` first (what one order book does), then
+Suggested reading order for the code: `abm/orderbook.py` first (what one order book does), then
 `abm/agents.py` and `abm/simulation.py` (what runs on top of it), then whichever
-`analysis/*.py` file matches what you're trying to measure. `experiments/` only
-orchestrates those pieces at scale — there's no separate logic to learn there.
+`analysis/*.py` file matches the quantity of interest. `experiments/` only
+orchestrates those pieces at scale — there is no separate model logic there.
 
 ## Running things
 
 Run every command from the project root, using `python -m` so the imports resolve.
 
-Tests (each file is self-contained and prints PASS/FAIL per check):
+All tests at once (about a minute):
 
 ```
-python -m tests.test_orderbook
-python -m tests.test_agents
-python -m tests.test_simulation
-python -m tests.test_hurst
-python -m tests.test_returns
-python -m tests.test_prices
-python -m tests.test_depth_profile
-python -m tests.test_provenance
-python -m tests.test_checkpoint
-python -m tests.test_fig2
+python -m pytest tests -q
 ```
+
+Or one test file at a time, printing PASS/FAIL per check, e.g. `python -m tests.test_orderbook`.
 
 A single simulation with the paper's Fig. 2 parameters (short run):
 
@@ -70,25 +64,45 @@ A single simulation with the paper's Fig. 2 parameters (short run):
 python -m abm.simulation
 ```
 
-Fig. 2 reproduction. Runs are independent and spread over CPU cores; the paper-scale
-default (10^6 steps, 50 runs per N_A) takes many hours, so try a small one first:
+### Reproducing the figures
+
+`experiments.run` runs one experiment: 50 independent runs for each of N_A = 125, 250, 500, spread
+over CPU cores. `--flow` chooses how the takers' buy probability behaves: `symmetric` (constant ½,
+Fig. 2; the default), `bounded` or `mean-reverting` (the two random walks of Fig. 3). Each flow is a
+separate experiment with its own results file. The paper-scale default (10⁶ steps, 50 runs per N_A)
+takes about 5–6 hours per flow on a 4-core laptop, so a small trial first is advisable:
 
 ```
-python -m experiments.fig2 --n-steps 100000 --n-runs 4 --out results/fig2_quick.pkl
-python -m experiments.plot_fig2 --data results/fig2_quick.pkl --out results/fig2_quick.png
+python -m experiments.run --n-steps 100000 --n-runs 4 --out results/fig2_trial.pkl
+python -m experiments.plot fig2 --data results/fig2_trial.pkl --out results/fig2_trial.png
 ```
 
-The paper doesn't say which "price" it uses, so each run stores results for five definitions (`mid`,
-`last`, `first`, `median`, `mean`). `--price median` picks one for panels (c) and (d); a second
-figure, `fig2_quick_price_definitions.png`, compares all five (see `docs/decisions.md`, D11).
+Fig. 3 needs both random-walk experiments:
+
+```
+python -m experiments.run --flow bounded --out results/fig3_bounded.pkl
+python -m experiments.run --flow mean-reverting --out results/fig3_mean_reverting.pkl
+python -m experiments.plot fig3 --bounded results/fig3_bounded.pkl --mean-reverting results/fig3_mean_reverting.pkl --out results/fig3.png
+```
+
+The paper does not say which "price" it uses, so each run stores results for five definitions
+(`mid`, `last`, `first`, `median`, `mean`). The plots use the median trade price by default
+(`docs/decisions.md`, D11); `--price mid` etc. selects another. `plot fig2` also saves a second
+figure (`..._price_definitions.png`) comparing all five.
 
 Each run is saved as soon as it finishes (in `<name>.pkl.parts/`), so an interruption
 (sleep, crash, power cut) loses at most the runs in progress. To continue, repeat the same
 command with `--resume`; already-saved runs are skipped. `--resume` also extends a finished
 experiment: run 10 seeds now, then rerun with `--n-runs 50 --resume` to add the other 40. It
-refuses if the settings or code version differ from the saved runs (`--allow-code-change`
-overrides the code check when you know the change doesn't affect the simulation).
+refuses if the settings, the flow or the code version differ from the saved runs
+(`--allow-code-change` overrides the code check when the change is known not to affect the
+simulation). If a run fails or the experiment is stopped with Ctrl+C, the runs still queued are
+cancelled at once rather than run to completion.
+
+Note for PowerShell: do not pipe the runner's output through `Select-Object -First N`. That closes
+the output after N lines, which stops the runner at its next progress message.
 
 ## Requirements
 
-Python 3.12+ (the fast simulation method uses `random.binomialvariate`) with `numpy` and `matplotlib`.
+Python 3.12+ (the fast simulation method uses `random.binomialvariate`) with `numpy`, `matplotlib`
+and `pytest`.

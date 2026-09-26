@@ -2,7 +2,7 @@
 Tests for saving progress as an experiment runs, and resuming it.
 Run with: python -m tests.test_checkpoint   (from the project root)
 
-The end-to-end tests run the real Fig. 2 runner at a tiny scale (2,000 steps). To prove that
+The end-to-end tests run the real experiment runner (experiments/run.py) at a tiny scale (2,000 steps). To prove that
 saved runs are *reused* and not silently recomputed, they overwrite a saved run's
 `mean_orders` with an impossible marker value and check the marker survives to the final file.
 """
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from experiments import fig2
+from experiments import run
 from experiments.checkpoint import (atomic_pickle, parts_dir_for, has_parts, save_meta, save_part,
                                     load_parts, check_compatible)
 from experiments.provenance import git_info
@@ -31,13 +31,13 @@ def check(label, condition):
 
 
 def run_main(out, *extra, n_runs=1, n_steps=STEPS):
-    """Run the fig2 runner in-process, returning (its printed output, SystemExit message or None)."""
+    """Run the experiment runner in-process, returning (its printed output, SystemExit message or None)."""
     argv = ["--n-steps", str(n_steps), "--n-runs", str(n_runs), "--workers", "2", "--out", str(out), *extra]
     buffer = io.StringIO()
     exit_message = None
     with contextlib.redirect_stdout(buffer):
         try:
-            fig2.main(argv)
+            run.main(argv)
         except SystemExit as e:
             exit_message = str(e)
     return buffer.getvalue(), exit_message
@@ -118,8 +118,8 @@ def test_resume_reuses_saved_runs_and_finishes():
         out = Path(tmp) / "r.pkl"
         parts = parts_dir_for(out)
         # Simulate an interruption after one run finished.
-        save_meta(parts, fig2.make_config(STEPS, git_info()))
-        saved = fig2.run_one((125, 0, STEPS))
+        save_meta(parts, run.make_config(STEPS, git_info()))
+        saved = run.run_one((125, 0, STEPS, "symmetric"))
         saved["mean_orders"] = MARKER
         save_part(parts, (125, 0), saved)
 
@@ -140,7 +140,7 @@ def test_refuses_to_overwrite_unfinished_run_without_resume():
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "r.pkl"
         parts = parts_dir_for(out)
-        save_meta(parts, fig2.make_config(STEPS, git_info()))
+        save_meta(parts, run.make_config(STEPS, git_info()))
         save_part(parts, (125, 0), {"n_agents": 125, "seed": 0, "mean_orders": MARKER})
         text, error = run_main(out)
         still_there = has_parts(parts)
@@ -152,7 +152,7 @@ def test_resume_refuses_when_settings_changed():
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "r.pkl"
         parts = parts_dir_for(out)
-        save_meta(parts, fig2.make_config(STEPS, git_info()))
+        save_meta(parts, run.make_config(STEPS, git_info()))
         save_part(parts, (125, 0), {"n_agents": 125, "seed": 0, "mean_orders": MARKER})
         text, error = run_main(out, "--resume", n_steps=STEPS + 500)
     check("refuses, naming the setting that differs", error is not None and "n_steps" in error)
@@ -163,7 +163,7 @@ def test_extending_a_finished_experiment_reuses_its_runs():
         out = Path(tmp) / "r.pkl"
         run_main(out, n_runs=1)
         first = load_final(out)
-        first["runs"][0]["mean_orders"] = MARKER          # tag a run so we can see it survive
+        first["runs"][0]["mean_orders"] = MARKER          # tag a run so its survival can be checked
         tagged_key = (first["runs"][0]["n_agents"], first["runs"][0]["seed"])
         atomic_pickle(first, out)
 
@@ -183,10 +183,23 @@ def test_extending_a_finished_experiment_reuses_its_runs():
     check("and the results file is left intact", len(after_refusal["runs"]) == 6)
 
 
+def test_resume_refuses_a_different_order_flow():
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "r.pkl"
+        parts = parts_dir_for(out)
+        save_meta(parts, run.make_config(STEPS, git_info(), "bounded"))
+        save_part(parts, (125, 0), {"n_agents": 125, "seed": 0, "mean_orders": MARKER})
+        text, error = run_main(out, "--resume", "--flow", "mean-reverting")
+        still_there = has_parts(parts)
+    check("bounded-walk runs can't be continued as mean-reverting: refused, naming 'flow'",
+          error is not None and "flow" in error)
+    check("saved runs untouched", still_there)
+
+
 def test_results_from_an_older_format_are_not_mixed_in():
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "r.pkl"
-        old_config = {k: v for k, v in fig2.make_config(STEPS, git_info()).items()
+        old_config = {k: v for k, v in run.make_config(STEPS, git_info()).items()
                       if k not in ("format", "price_definitions", "lag_points")}
         atomic_pickle({"config": old_config, "runs": [{"n_agents": 125, "seed": 0, "h": [0.1]}]}, out)
         text, error = run_main(out, "--resume")

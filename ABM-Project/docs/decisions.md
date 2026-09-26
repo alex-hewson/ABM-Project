@@ -84,6 +84,21 @@ verified by test and simulation:* this is a discrete Ornstein–Uhlenbeck proces
 Consequences: the S = 1/2 bound is effectively never reached, and 500 steps is the time scale that
 should set the window in which H > 1/2 (to be compared with Fig. 3c when reproduced).
 
+**D20. The Fig. 3 experiment: one results file per flow, fresh flow per run, q recorded. [Assumed, Checked]**
+The experiment runner (`experiments/run.py`, formerly `fig2.py`) takes `--flow symmetric|bounded|mean-reverting`;
+each flow is a separate experiment with its own results file, and the flow's settings are saved in it, so
+runs from different flows cannot be combined by `--resume` and a file cannot be plotted as the wrong panel.
+The symmetric case produces exactly what the earlier Fig. 2 runner did, so `fig2_final.pkl` remains valid.
+Each run builds a new flow process inside its own job, so every run starts from q = 1/2 (reusing one process
+object would start each run where the previous one ended). Each run with a random-walk flow stores
+⟨(q − 1/2)²⟩ and the range and spread of q, which Eq. 4 needs. *Checked against theory:* the reflected
+bounded walk spreads q evenly over [0.45, 0.55], giving √⟨(q − 1/2)²⟩ = 0.1/√12 = 0.0289 (trial runs:
+0.028–0.029); the mean-reverting walk gives 0.0155–0.0160 against the 0.0158 derived in D19.
+*Signed return distributions:* only |Δp| histograms are stored. The Fig. 3 plot adds an inset of the signed
+distribution for the largest Δτ, reconstructed by mirroring (P(+x) = P(−x) = P(|Δp| = x)/2). This assumes the
+distribution is symmetric about zero, which holds by construction because both walks are symmetric about
+q = 1/2. Resolution in the inset follows the log-spaced bins: fine near zero, coarse in the tails.
+
 ---
 
 ## 2. Implementation choices that could change results
@@ -107,7 +122,7 @@ i5-8365U laptop (4 cores / 8 threads). The fast method needs Python ≥ 3.12 (`r
 
 **D10. A book with an empty side aborts a Fig. 2 run instead of being patched. [Assumed]**
 `run_simulation` itself records `None` as the mid-price for any step with an empty side and carries
-on. `experiments/fig2.py` then refuses that run: building the price series raises an error naming the
+on. The experiment runner (`experiments/run.py`) then refuses that run: building the price series raises an error naming the
 seed, so a one-sided book stops the experiment rather than being interpolated over. Reason: for an
 instability study, "the book went one-sided" is itself an event that should be seen. Not triggered in
 any run so far (0 empty-book failures in all 150 runs of `fig2_final.pkl`).
@@ -206,8 +221,8 @@ the 0.5-tick (mid-price) grid, and used it for every price definition. Applied t
 (whole ticks), alternating bins then caught one grid point or none, producing a visible zigzag in
 panel (d) for `last`/`first`/`median`/`mean` (`fig2_full.png`, spotted by the user). `mid` was
 unaffected, and panel (c), which is RMS-based, is unaffected either way. Fixed by building edges
-per price definition (`experiments/fig2.py:make_bin_edges`); guarded by
-`tests/test_fig2.py`, which includes a test that reproduces the original bug on mismatched
+per price definition (`make_bin_edges` in `experiments/run.py`, then called `fig2.py`); guarded by
+`tests/test_run.py`, which includes a test that reproduces the original bug on mismatched
 edges. The affected results were regenerated in `fig2_final.pkl` (the Hurst values in it are
 identical to the earlier run's, as expected, since the simulation code did not change).
 Increments below half a grid step (including zero) fall outside the bins. **[Open]** the paper's
@@ -226,11 +241,13 @@ This is only approximate.
   H(Δτ) anti-persistent at short lags with its minimum ≈ 0.08 near Δτ ≈ 10 and rising to ≈ 0.5 by
   Δτ ≈ 10⁴ (with the median trade price, D11), and Gaussian return distributions.
 - Not yet reproduced or checked: Fig. 4.
-- Fig. 3, first look only (single runs, N_A = 250, 10⁵ steps, seed 0; see D16–D19). Bounded walk: H rises
-  to 0.84–0.86 near Δτ ≈ 10³ and falls back toward 0.5 by 10⁴ (paper: "up to 0.9", then H = 1/2).
-  Mean-reverting walk: H peaks at 0.57–0.59 near Δτ ≈ 3×10³ (paper: "closer to experimental
-  behaviour", real markets ≲ 0.6). Encouraging but not a reproduction: one short run each, no averaging
-  over runs, and the return distributions (bimodal for 3a, Gaussian for 3c) are unchecked.
+- Fig. 3, trial only (10⁵ steps, 4 runs per N_A, median trade price; `results/fig3_trial.png`; see D16–D20).
+  Bounded walk: H rises to ≈ 0.85 near Δτ ≈ 10³ (paper: "up to 0.9"), and the signed increments at Δτ = 1600
+  are bimodal, with peaks near ±160 ticks and a dip at zero (paper: bimodal). Mean-reverting walk: H peaks
+  at ≈ 0.58–0.64 near Δτ ≈ 10³ (paper: "closer to experimental behaviour", real markets ≲ 0.6), and the
+  increments are single-peaked and roughly Gaussian (paper: approximately Gaussian). Encouraging, but not a
+  reproduction until the paper-scale runs (10⁶ steps, 50 runs per N_A) are done; the trial's longest
+  lags reach only 10⁴, so the return of H to 0.5 at long lags is not yet visible.
 
 ## 5. Still open
 

@@ -1,29 +1,32 @@
 """
-Data generation for Fig. 2 of Preis et al. (2006): the symmetric model
-(q_provider = q_taker = 0.5, alpha=0.15, mu=0.025, delta=0.025, lambda_0=100).
+Experiment runner for the Preis et al. (2006) figures: runs many independent simulations and saves
+the quantities the figures need to one results file. experiments/plot.py draws the figures from it.
 
-    (a) price path of one run, N_A = 250
-    (b) order book depth around the midpoint, averaged over the last 10^4 MCS, N_A = 500
-    (c) Hurst exponent H(delta tau) for N_A = 125, 250, 500, averaged over runs
-    (d) distributions of price increments for delta tau = 200, 400, 800, 1600, N_A = 500
+Parameters are the paper's (alpha=0.15, mu=0.025, delta=0.025, lambda_0=100, q_provider = 0.5).
+--flow chooses how the takers' buy probability q_taker behaves (docs/decisions.md, D16-D19):
 
-The paper doesn't say which "price" it uses, and the choice changes (c) at short lags, so every
-run stores results for ALL the definitions in analysis/prices.py (mid, last, first, median, mean).
-For (c) it stores the RMS price change at ~80 lags from 1 to n_steps/10, not finished H values;
-plot_fig2.py derives H from those (see analysis/hurst.py), so lag spacing and price definition
-can be changed later without re-simulating.
+    symmetric        constant 1/2                           Fig. 2
+    bounded          bounded random walk (Fig. 3a)          Fig. 3a/3b
+    mean-reverting   mean-reverting random walk (Fig. 3c)   Fig. 3c/3d
 
-Runs are independent (one seed each), so they are spread over CPU cores. Only small derived
-quantities are kept per run, and everything is saved to one pickle so that plot_fig2.py can
-redraw figures without re-simulating.
+Each flow is a separate experiment with its own results file. Every run stores:
+    - RMS price change at ~80 lags from 1 to n_steps/10, for all five price definitions in
+      analysis/prices.py (H(delta tau) is derived from these at plot time; see analysis/hurst.py)
+    - |price increment| histograms for delta tau = 200, 400, 800, 1600, for all five definitions
+    - order book depth around the midpoint over the last 10^4 steps (N_A = 500 only)
+    - the mid-price path (N_A = 250, seed 0 only)
+    - with a random-walk flow: summary statistics of q_taker, including <(q - 1/2)^2> (Eq. 4)
 
-Each run is also saved the moment it finishes (see checkpoint.py), so an interrupted
-experiment can be continued with --resume. Resuming with a larger --n-runs extends it.
+Runs are independent (one seed each), so they are spread over CPU cores. Each run is also saved
+the moment it finishes (see checkpoint.py), so an interrupted experiment can be continued with
+--resume. Resuming with a larger --n-runs extends it.
 
-Usage (paper scale is the default; expect hours):
-    python -m experiments.fig2 --n-steps 100000 --n-runs 4    # quick check
-    python -m experiments.fig2                                 # 10^6 steps, 50 runs per N_A
-    python -m experiments.fig2 --resume                        # continue after an interruption
+Usage (paper scale is the default: 10^6 steps, 50 runs per N_A; expect hours per flow):
+    python -m experiments.run --n-steps 100000 --n-runs 4        # quick check (symmetric)
+    python -m experiments.run --out results/fig2.pkl             # Fig. 2 data
+    python -m experiments.run --flow bounded --out results/fig3_bounded.pkl
+    python -m experiments.run --flow mean-reverting --out results/fig3_mean_reverting.pkl
+    ... add --resume to continue after an interruption
 """
 
 from __future__ import annotations
@@ -35,9 +38,11 @@ import shutil
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 
+from abm.agents import BoundedRandomWalk, MeanRevertingWalk
 from abm.simulation import run_simulation
 from analysis.hurst import log_spaced_taus, rms_at_lags
 from analysis.prices import PRICE_DEFINITIONS, price_series
@@ -49,11 +54,38 @@ from experiments.checkpoint import (atomic_pickle, parts_dir_for, has_parts, sav
 RESULTS_FORMAT = 3           # bump when what each run stores changes, so old files aren't mixed in
 PARAMS = dict(alpha=0.15, mu=0.025, delta=0.025, lambda_=100, q_provider=0.5, q_taker=0.5)
 AGENT_COUNTS = (125, 250, 500)
-PATH_AGENTS = 250            # panel (a)
-DEPTH_AGENTS = 500           # panel (b) and (d)
-DEPTH_WINDOW = 10_000        # panel (b): average depth over this many final steps
+PATH_AGENTS = 250            # price path is kept for this N_A (seed 0)
+DEPTH_AGENTS = 500           # depth profile and return distributions are plotted for this N_A
+DEPTH_WINDOW = 10_000        # depth profile: averaged over this many final steps
 RETURN_TAUS = (200, 400, 800, 1600)
 LAG_POINTS = 80              # number of log-spaced lags (from 1 to n_steps/10) at which RMS is stored
+
+# Order-flow processes for the takers' buy probability (decisions D16-D19). "symmetric" means no
+# process: every taker keeps q_taker = 1/2, exactly the Fig. 2 model.
+FLOWS = {
+    "symmetric": None,
+    "bounded": BoundedRandomWalk,
+    "mean-reverting": MeanRevertingWalk,
+}
+
+
+def make_flow(name: str):
+    """A NEW flow process for one run (None for "symmetric"). A process carries its position from
+    step to step, so reusing one across runs would start later runs where the previous one stopped;
+    building it here, inside each job, guarantees every run starts from q = 1/2."""
+    if name not in FLOWS:
+        raise ValueError(f"unknown flow {name!r}; choose from {tuple(FLOWS)}")
+    process_class = FLOWS[name]
+    return None if process_class is None else process_class()
+
+
+def describe_flow(name: str) -> Optional[dict]:
+    """The flow's settings, as saved in the results file (None for "symmetric", which keeps
+    symmetric files identical in format to those made before flows existed)."""
+    flow = make_flow(name)
+    if flow is None:
+        return None
+    return {"name": name, "step": flow.step, "half_width": flow.K * flow.step, "centre": flow.centre}
 
 
 def make_bin_edges(grid_step: float, min_ticks: float = 1.0, max_ticks: float = 5_000.0,
@@ -82,14 +114,17 @@ RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
 
 
 def run_one(job):
-    """One independent simulation, reduced to the quantities the figure needs."""
-    n_agents, seed, n_steps = job
+    """One independent simulation, reduced to the quantities the figures need.
+    job = (n_agents, seed, n_steps, flow name)."""
+    n_agents, seed, n_steps, flow_name = job
+    flow = make_flow(flow_name)                 # fresh for this run
     record_depth = n_agents == DEPTH_AGENTS
     result = run_simulation(
         n_agents=n_agents, n_steps=n_steps, seed=seed,
         depth_record_from=max(0, n_steps - DEPTH_WINDOW) if record_depth else None,
         keep_trades=False,            # millions of Trade objects per run otherwise
         record_trade_prices=True,
+        taker_flow=flow,
         **PARAMS,
     )
 
@@ -106,6 +141,12 @@ def run_one(job):
         if name == "mid":
             mid_path = prices
 
+    q_stats = None
+    if flow is not None:
+        q = result.q_taker_series
+        q_stats = {"mean_sq_dev": float(np.mean((q - flow.centre) ** 2)),   # <(q - 1/2)^2>, for Eq. 4
+                   "std": float(q.std()), "min": float(q.min()), "max": float(q.max())}
+
     return {
         "n_agents": n_agents,
         "seed": seed,
@@ -118,36 +159,43 @@ def run_one(job):
         "n_trades": result.n_trades,
         "n_match_failures": result.n_match_failures,
         "price_path": mid_path if (n_agents == PATH_AGENTS and seed == 0) else None,   # mid-price
+        "q_stats": q_stats,            # None for the symmetric flow
     }
 
 
 # Settings that must match for saved runs to be combined with new ones.
 CHECKED_SETTINGS = ("format", "n_steps", "params", "return_bin_edges", "depth_window",
-                    "price_definitions", "lag_points")
+                    "price_definitions", "lag_points", "flow")
 
 
-def make_config(n_steps: int, git: dict) -> dict:
+def make_config(n_steps: int, git: dict, flow_name: str = "symmetric") -> dict:
     """The settings that define an experiment; saved with the results and checked on --resume."""
     return {"format": RESULTS_FORMAT, "n_steps": n_steps, "params": PARAMS,
             "return_bin_edges": RETURN_BIN_EDGES, "depth_window": DEPTH_WINDOW,
-            "price_definitions": PRICE_DEFINITIONS, "lag_points": LAG_POINTS, "git": git}
+            "price_definitions": PRICE_DEFINITIONS, "lag_points": LAG_POINTS,
+            "flow": describe_flow(flow_name), "git": git}
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--flow", choices=tuple(FLOWS), default="symmetric",
+                        help="how the takers' buy probability behaves (default: symmetric, Fig. 2)")
     parser.add_argument("--n-steps", type=int, default=1_000_000)
     parser.add_argument("--n-runs", type=int, default=50, help="runs per N_A")
     parser.add_argument("--workers", type=int, default=os.cpu_count())
-    parser.add_argument("--out", type=Path, default=RESULTS_DIR / "fig2_data.pkl")
+    parser.add_argument("--out", type=Path, default=None,
+                        help="results file (default: results/<flow>.pkl)")
     parser.add_argument("--resume", action="store_true",
                         help="continue an interrupted experiment, skipping runs already saved")
     parser.add_argument("--allow-code-change", action="store_true",
                         help="with --resume: accept saved runs made at a different git commit")
     args = parser.parse_args(argv)
+    if args.out is None:
+        args.out = RESULTS_DIR / f"{args.flow}.pkl"
 
     # Captured before the runs start, so it describes the code the workers actually load.
     git = git_info()
-    config = make_config(args.n_steps, git)
+    config = make_config(args.n_steps, git, args.flow)
 
     parts_dir = parts_dir_for(args.out)
     if has_parts(parts_dir) and not args.resume:
@@ -190,6 +238,9 @@ def main(argv=None):
     # Slowest jobs (largest N_A) first so the pool doesn't end waiting on one long run.
     todo = sorted((k for k in all_keys if k not in finished), key=lambda k: -k[0])
 
+    flow = config["flow"]
+    print(f"order flow: {args.flow}" + ("" if flow is None else
+          f" (step {flow['step']}, half-width {flow['half_width']:g} around {flow['centre']})"))
     print(f"{len(all_keys)} runs ({args.n_runs} per N_A in {AGENT_COUNTS}), {args.n_steps:,} steps each, "
           f"{args.workers} workers")
     print(f"code version: {describe(config['git'])}")
@@ -203,15 +254,25 @@ def main(argv=None):
     start = time.perf_counter()
     if todo:
         with ProcessPoolExecutor(max_workers=args.workers) as pool:
-            futures = [pool.submit(run_one, (n, seed, args.n_steps)) for n, seed in todo]
-            for count, future in enumerate(as_completed(futures), n_already + 1):
-                r = future.result()   # re-raises any worker exception here
-                key = (r["n_agents"], r["seed"])
-                save_part(parts_dir, key, r)     # saved immediately, so an interruption loses at most the runs in flight
-                finished[key] = r
-                print(f"[{count}/{len(all_keys)}] N_A={r['n_agents']} seed={r['seed']} done "
-                      f"({time.perf_counter() - start:.0f}s elapsed, mean book {r['mean_orders']:.0f} orders)",
-                      flush=True)
+            futures = [pool.submit(run_one, (n, seed, args.n_steps, args.flow)) for n, seed in todo]
+            try:
+                for count, future in enumerate(as_completed(futures), n_already + 1):
+                    r = future.result()   # re-raises any worker exception here
+                    key = (r["n_agents"], r["seed"])
+                    save_part(parts_dir, key, r)     # saved immediately, so an interruption loses at most the runs in flight
+                    finished[key] = r
+                    print(f"[{count}/{len(all_keys)}] N_A={r['n_agents']} seed={r['seed']} done "
+                          f"({time.perf_counter() - start:.0f}s elapsed, mean book {r['mean_orders']:.0f} orders)",
+                          flush=True)
+            except BaseException:
+                # On any error (a failed run, Ctrl+C, output that can't be written), cancel the runs
+                # still queued. Otherwise leaving this block waits for ALL of them to finish -- hours at
+                # paper scale -- before the error is shown, and their results are discarded anyway.
+                # Runs already in progress still finish; runs saved so far are kept for --resume.
+                # wait=True matters: leaving the with-block calls shutdown() again without
+                # cancel_futures, which would undo the cancellation if it hadn't taken effect yet.
+                pool.shutdown(wait=True, cancel_futures=True)
+                raise
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     atomic_pickle({"config": {**config, "n_runs": args.n_runs}, "runs": [finished[k] for k in all_keys]}, args.out)
