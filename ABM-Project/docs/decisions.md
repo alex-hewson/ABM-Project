@@ -81,23 +81,28 @@ At exactly q = 1/2 there is no "toward", so a fair coin is used (the paper doesn
 verified by test and simulation:* this is a discrete Ornstein–Uhlenbeck process. The average pull is
 2Δs·(q − 1/2) per step, so q settles to a standard deviation of √(Δs/4) = 0.0158 (simulated: 0.0150,
 `tests/test_agents.py` checks it within 15%) and forgets its history over about 1/(2Δs) = 500 steps.
-Consequences: the S = 1/2 bound is effectively never reached, and 500 steps is the time scale that
-should set the window in which H > 1/2 (to be compared with Fig. 3c when reproduced).
+So the S = 1/2 bound is effectively never reached. The 500-step memory also fits the paper-scale
+Fig. 3c: H is above 1/2 from about Δτ ≈ 300 to 10⁴, with its peak near Δτ ≈ 10³.
 
-**D20. The Fig. 3 experiment: one results file per flow, fresh flow per run, q recorded. [Assumed, Checked]**
-The experiment runner (`experiments/run.py`, formerly `fig2.py`) takes `--flow symmetric|bounded|mean-reverting`;
-each flow is a separate experiment with its own results file, and the flow's settings are saved in it, so
-runs from different flows cannot be combined by `--resume` and a file cannot be plotted as the wrong panel.
-The symmetric case produces exactly what the earlier Fig. 2 runner did, so `fig2_final.pkl` remains valid.
-Each run builds a new flow process inside its own job, so every run starts from q = 1/2 (reusing one process
-object would start each run where the previous one ended). Each run with a random-walk flow stores
-⟨(q − 1/2)²⟩ and the range and spread of q, which Eq. 4 needs. *Checked against theory:* the reflected
-bounded walk spreads q evenly over [0.45, 0.55], giving √⟨(q − 1/2)²⟩ = 0.1/√12 = 0.0289 (trial runs:
-0.028–0.029); the mean-reverting walk gives 0.0155–0.0160 against the 0.0158 derived in D19.
-*Signed return distributions:* only |Δp| histograms are stored. The Fig. 3 plot adds an inset of the signed
-distribution for the largest Δτ, reconstructed by mirroring (P(+x) = P(−x) = P(|Δp| = x)/2). This assumes the
-distribution is symmetric about zero, which holds by construction because both walks are symmetric about
-q = 1/2. Resolution in the inset follows the log-spaced bins: fine near zero, coarse in the tails.
+**D20. Fig. 3 experiment setup. [Assumed, Checked]**
+`experiments/run.py` (was `fig2.py`) runs one flow at a time: `--flow symmetric`, `bounded` or
+`mean-reverting`. Each flow gets its own results file, which records the flow's settings. This stops
+runs from different flows being mixed by `--resume`, or a file being plotted as the wrong panel. The
+symmetric flow gives the same results as the old Fig. 2 runner, so `fig2_final.pkl` still works.
+
+A new flow is made for every run, so each run starts at q = 1/2. Reusing one flow would start each
+run where the last one finished.
+
+Each run also saves ⟨(q − 1/2)²⟩ and the spread of q, which Eq. 4 needs. Checked against theory on
+the 50-run data: the bounded walk spreads q evenly over [0.45, 0.55], so √⟨(q − 1/2)²⟩ should be
+0.1/√12 = 0.0289 (measured 0.0288–0.0289). The mean-reverting walk should give Δs/4 = 2.50×10⁻⁴
+(D19), and gives 2.50×10⁻⁴ for all N_A. This is the value Eq. 4 needs.
+
+Only |Δp| histograms are saved, so the signed distributions in the Fig. 3 insets are made by
+mirroring them (half the |Δp| density on each side of zero). This only works because both walks are
+symmetric about q = 1/2, so the distributions are symmetric too. Like the paper, the inset shows all
+four Δτ, which shows the bounded walk's distribution going from one peak (Δτ = 200) to two
+(Δτ = 800 and 1600).
 
 ---
 
@@ -235,25 +240,30 @@ This is only approximate.
 ## 4. What has and has not been compared with the paper
 
 - The paper's *figures* have not been overlaid. Only its text was read programmatically; comparisons to
-  Fig. 2 rest on the user's readings of the PDF. An overlay or digitised curves would be stronger.
+  Figs. 2 and 3 rest on the user's readings of the PDF. An overlay or digitised curves would be stronger.
 - **Fig. 2, reproduced qualitatively at paper scale** (`fig2_final.png`, 10⁶ steps, 50 runs per N_A):
   price-path scale (±1000 ticks in 10⁶ steps), depth profile shape and its lognormal fit (D14),
   H(Δτ) anti-persistent at short lags with its minimum ≈ 0.08 near Δτ ≈ 10 and rising to ≈ 0.5 by
   Δτ ≈ 10⁴ (with the median trade price, D11), and Gaussian return distributions.
+- **Fig. 3, reproduced qualitatively at paper scale** (`fig3_final.png`, 10⁶ steps, 50 runs per N_A,
+  commit a65a28c, median trade price; D16–D20).
+  - Bounded walk: H peaks at 0.80 / 0.84 / 0.87 (N_A = 125 / 250 / 500) near Δτ ≈ 10³, and is back to
+    0.5 by Δτ ≈ 7×10⁴. Paper: "up to 0.9", then 1/2 at long lags. The return distribution goes from one
+    peak at Δτ = 200 to two peaks at Δτ = 800 and 1600 (at ±150 ticks for Δτ = 1600), as in the paper's
+    bimodal distribution and its inset. The inset's height (0.0136 at Δτ = 200) also matches the
+    paper's (about 0.012).
+  - Mean-reverting walk: H peaks at 0.56 / 0.60 / 0.63 near Δτ ≈ 10³, and is back to 0.5 by
+    Δτ ≈ 1–3×10⁴. Paper: closer to real markets, where H is at most about 0.6. The return distributions
+    have one peak and a kurtosis of 2.75–2.95, close to Gaussian (3). Paper: approximately Gaussian.
+  - In both, a larger N_A gives a higher peak H.
 - Not yet reproduced or checked: Fig. 4.
-- Fig. 3, trial only (10⁵ steps, 4 runs per N_A, median trade price; `results/fig3_trial.png`; see D16–D20).
-  Bounded walk: H rises to ≈ 0.85 near Δτ ≈ 10³ (paper: "up to 0.9"), and the signed increments at Δτ = 1600
-  are bimodal, with peaks near ±160 ticks and a dip at zero (paper: bimodal). Mean-reverting walk: H peaks
-  at ≈ 0.58–0.64 near Δτ ≈ 10³ (paper: "closer to experimental behaviour", real markets ≲ 0.6), and the
-  increments are single-peaked and roughly Gaussian (paper: approximately Gaussian). Encouraging, but not a
-  reproduction until the paper-scale runs (10⁶ steps, 50 runs per N_A) are done; the trial's longest
-  lags reach only 10⁴, so the return of H to 0.5 at long lags is not yet visible.
 
 ## 5. Still open
 
 - **Depth-profile fit (D14):** whether the paper fits each side separately or combined.
 - **Asymmetric flow (D16, D18):** the q_provider variant the paper mentions, and whether mirror vs
   blocked reflection matters.
-- **Eq. 4 (volatility-coupled depth):** ⟨(q_taker − ½)²⟩ is "determined separately before the main
-  simulation"; the paper gives no procedure, so the calibration run must be designed and documented.
+- **Eq. 4 (volatility-coupled depth):** the paper says ⟨(q_taker − ½)²⟩ is "determined separately
+  before the main simulation" but gives no procedure. Its value is now known: 2.50×10⁻⁴, both derived
+  (D19) and measured (D20). Which of the two to use still needs recording when Fig. 4 is built.
 - **Baseline tag:** tagging the finished baseline (`baseline-v1`) as the control model.

@@ -19,12 +19,15 @@ repository in OneDrive `Work/ABM/Papers/`).
   10⁶ steps, 50 runs per N_A, commit 393cdee (D11, D13)
 - Asymmetric order flow: shared, time-varying q_taker, bounded and mean-reverting walks (D16–D19)
 - One experiment runner and one plotter for both figures (`experiments/run.py --flow ...`,
-  `experiments/plot.py fig2|fig3`); Fig. 3 trial at 10⁵ steps matches the paper qualitatively (D20)
+  `experiments/plot.py fig2|fig3`) (D20)
+- **Fig. 3 reproduced qualitatively at paper scale**: `results/fig3_bounded.pkl`,
+  `results/fig3_mean_reverting.pkl`, `results/fig3_final.png`, 10⁶ steps, 50 runs per N_A,
+  commit a65a28c (`decisions.md`, section 4)
 
 Code layout and how to run things: see `README.md`.
 
-**Git:** `main` holds the finished Fig. 2 baseline (393cdee). Fig. 3 work is on `fig3-asymmetric-flow`,
-to be merged into `main` once Fig. 3 is reproduced.
+**Git:** `main` holds the finished Fig. 2 baseline (393cdee). Fig. 3 is finished on
+`fig3-asymmetric-flow` and ready to merge into `main`.
 
 ## Open questions
 Each is described in `decisions.md`:
@@ -33,7 +36,7 @@ Each is described in `decisions.md`:
 - Whether the paper's lognormal fit is per side or combined (D14)
 - The q_provider variant of asymmetric flow, not implemented (D16)
 - Mirrored vs blocked reflection in the bounded walk, untested (D18)
-- The calibration procedure for Eq. 4 (below)
+- Eq. 4: whether to use the derived or the measured value of ⟨(q−½)²⟩ (they agree; D19, D20)
 
 ---
 
@@ -50,17 +53,14 @@ This is the methodological foundation — everything built later is compared aga
    - (c) H(Δτ) for N_A = 125, 250, 500: minimum ≈ 0.08 near Δτ ≈ 10, rising to ≈ 0.5 by
      Δτ ≈ 10⁴ (D11, D13)
    - (d) Return distributions for Δτ = 200, 400, 800, 1600, N_A=500: no fat tails (D15)
-3. **Add asymmetric order flow (Fig. 3)** — model, runner and plot done (D16–D20); a trial
-   (10⁵ steps, 4 runs per N_A) matches the paper qualitatively (`decisions.md`, section 4).
-   **Still to do:** the two paper-scale runs (10⁶ steps, 50 runs per N_A, about 5–6 hours each).
-   - 3a. Bounded random walk (Δs=0.001, S=0.05): expect H up to ≈ 0.9 at medium Δτ and bimodal returns
-   - 3c. Mean-reverting walk (Δs=0.001, S=½): expect H closer to real markets (≲ 0.6) and ≈ Gaussian
-     returns
+3. ~~**Add asymmetric order flow (Fig. 3)**~~ (done at paper scale, `fig3_final`; D16–D20)
+   - 3a. Bounded random walk (Δs=0.001, S=0.05): H peaks at 0.80–0.87 near Δτ ≈ 10³; returns bimodal
+   - 3c. Mean-reverting walk (Δs=0.001, S=½): H peaks at 0.56–0.63; returns close to Gaussian
 4. **Add volatility-coupled entry depth (Eq. 4, Fig. 4)**
    - λ(t) = λ₀ · (1 + |q_taker(t)−½| / √⟨(q_taker−½)²⟩ · C_λ), λ₀=100, C_λ=10
    - ⟨(q−½)²⟩ is "determined separately before the main simulation"; the paper gives no
-     procedure, so a calibration pre-run must be designed and documented. The q values it needs
-     are already recorded per step (D17).
+     procedure. Its value is 2.50×10⁻⁴, derived (D19) and measured on the Fig. 3 runs (D20), so no
+     separate calibration run is needed.
    - Expected: H(Δτ) qualitatively unchanged, but distinct fat tails (exponential tails on a
      semi-log plot) in P(Δp), confirming fat tails only appear with this feedback mechanism
 5. **Checkpoint / write-up**
@@ -130,7 +130,8 @@ Test regulatory levers against the model, following Jacob Leal & Napoletano:
 
 ## Immediate next steps
 
-1. Commit the runner/plotter generalisation on `fig3-asymmetric-flow`.
-2. Run the two paper-scale Fig. 3 experiments (commands in `README.md`), one per night, then plot.
-3. If Fig. 3 is reproduced, merge `fig3-asymmetric-flow` into `main`.
-4. Then Eq. 4 / Fig. 4, and tag `baseline-v1` once Figs. 2–4 are reproduced.
+1. Commit the Fig. 3 results and plot changes on `fig3-asymmetric-flow`.
+2. Merge `fig3-asymmetric-flow` into `main`.
+3. Move the project up to the repository root, so there is one README and no double
+   `ABM-Project\ABM-Project` folder in clones (agreed for after Fig. 3).
+4. Eq. 4 / Fig. 4, then tag `baseline-v1` once Figs. 2–4 are reproduced.

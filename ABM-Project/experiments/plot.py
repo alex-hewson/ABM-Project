@@ -13,7 +13,7 @@ fig2   (a) mid-price path, (b) depth profile with lognormal fit, (c) H(delta tau
        --out with "_price_definitions" added to the name.
 fig3   (a)/(b) H(delta tau) and |increment| distributions for the bounded random walk,
        (c)/(d) the same for the mean-reverting walk. Each distribution panel has an inset showing the
-       signed increments for the largest delta tau on linear axes (see plot_returns).
+       signed increments for every delta tau on linear axes, as in the paper (see plot_returns).
 
 Each command checks that the files it is given were made with the flow it expects, so e.g. a
 bounded-walk file can't be plotted as the mean-reverting one by mistake.
@@ -130,14 +130,15 @@ def plot_hurst(ax, runs, price, title):
 def plot_returns(ax, runs, bin_edges_by_price, price, title, signed_inset=False):
     """|increment| distributions at N_A = DEPTH_AGENTS, one curve per delta tau, log-log.
 
-    signed_inset adds a small linear-axes plot of the SIGNED increments for the largest delta tau,
-    which is where a bimodal distribution (Fig. 3b) shows up clearly. Only |increment| is stored,
-    so the signed density is reconstructed by mirroring: f(+x) = f(-x) = P(|dp| = x) / 2. This
-    assumes the distribution is symmetric about zero, which holds by construction here, since every
-    flow process is symmetric about q = 1/2 (docs/decisions.md, D20)."""
+    signed_inset adds a small linear-axes plot of the SIGNED increments for every delta tau, as in the
+    paper's Fig. 3b inset: on linear axes a bimodal distribution shows up clearly, and so does its
+    peak splitting and flattening as delta tau grows. Only |increment| is stored, so the signed
+    density is reconstructed by mirroring: f(+x) = f(-x) = P(|dp| = x) / 2. This assumes the
+    distribution is symmetric about zero, which holds by construction here, since every flow process
+    is symmetric about q = 1/2 (docs/decisions.md, D20)."""
     bin_edges = bin_edges_by_price[price]
     centres = np.sqrt(bin_edges[:-1] * bin_edges[1:])   # geometric centre of log-spaced bins
-    largest = None
+    curves = []                                          # (tau, counts, density), for the inset
     for tau in RETURN_TAUS:
         counts = sum(r["return_counts"][price][tau] for r in runs
                      if r["n_agents"] == DEPTH_AGENTS and tau in r["return_counts"][price])
@@ -146,23 +147,25 @@ def plot_returns(ax, runs, bin_edges_by_price, price, title, signed_inset=False)
         dens = counts_to_density(counts, bin_edges)
         keep = dens > 0
         ax.plot(centres[keep], dens[keep], "o-", ms=3, lw=0.8, label=f"$\\Delta\\tau$={tau}")
-        largest = (tau, counts, dens)
+        curves.append((tau, counts, dens))
     ax.set(xscale="log", yscale="log", xlabel="|$\\Delta$p| [ticks]", ylabel="P(|$\\Delta$p|)",
            title=f"{title}, N$_A$={DEPTH_AGENTS}, price = {price}")
     # The curves sit along the top and drop away on the right, so the lower left is empty: the inset
     # goes there, and the legend moves to the middle to make room.
     ax.legend(fontsize=7, loc="center" if signed_inset else "lower left")
 
-    if signed_inset and largest is not None:
-        tau, counts, dens = largest
-        cumulative = np.cumsum(counts) / counts.sum()
-        x_max = bin_edges[1:][np.searchsorted(cumulative, 0.999)]     # covers 99.9% of increments
+    if signed_inset and curves:
+        # x range: 99.9% of the widest (largest delta tau) distribution's increments.
+        _, widest_counts, _ = curves[-1]
+        cumulative = np.cumsum(widest_counts) / widest_counts.sum()
+        x_max = bin_edges[1:][np.searchsorted(cumulative, 0.999)]
         keep = centres <= x_max
-        x = np.concatenate([-centres[keep][::-1], centres[keep]])
-        y = np.concatenate([dens[keep][::-1], dens[keep]]) / 2
         inset = ax.inset_axes([0.07, 0.08, 0.36, 0.3])
-        inset.plot(x, y, "-", lw=0.9, color="C3")
-        inset.set_title(f"signed, $\\Delta\\tau$={tau} (linear)", fontsize=6)
+        for colour, (tau, counts, dens) in enumerate(curves):       # same colours as the main curves
+            x = np.concatenate([-centres[keep][::-1], centres[keep]])
+            y = np.concatenate([dens[keep][::-1], dens[keep]]) / 2
+            inset.plot(x, y, "-", lw=0.9, color=f"C{colour}")
+        inset.set_title("signed $\\Delta$p, linear axes", fontsize=6)
         inset.tick_params(labelsize=5)
 
 
