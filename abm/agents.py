@@ -36,7 +36,8 @@ class LiquidityProvider:
     lambda_: float     # mean entry depth 
 
     def maybe_submit(
-            self, book: OrderBook, timestamp: int, fallback_price: int, rng: Optional[random.Random] = None
+            self, book: OrderBook, timestamp: int, fallback_price: int, rng: Optional[random.Random] = None,
+            lambda_: Optional[float] = None,
     ) -> Optional[int]:
         '''
         Probability alpha of submitting an order in this step.
@@ -51,23 +52,29 @@ class LiquidityProvider:
         r = rng or random
         if r.random() >= self.alpha:
             return None
-        return self.submit(book, timestamp, fallback_price, r)
+        return self.submit(book, timestamp, fallback_price, r, lambda_)
 
     def submit(
-            self, book: OrderBook, timestamp: int, fallback_price: int, rng: Optional[random.Random] = None
+            self, book: OrderBook, timestamp: int, fallback_price: int, rng: Optional[random.Random] = None,
+            lambda_: Optional[float] = None,
     ) -> int:
         '''
         Submit a limit order unconditionally: the part of maybe_submit that follows the alpha draw.
         Included as a separate function to allow fast simulation loop to decide how many providers act in a step in one go.
         Returns the order_id.
+
+        lambda_, if given, replaces this agent's own mean entry depth for this one order. That is how the
+        time-varying entry depth of Eq. 4 (paper Fig. 4) reaches every provider: the simulation works out
+        lambda(t) each step and passes it in, in the same way as q_taker for the takers.
         '''
         r = rng or random
         mid = book.mid_price()
         reference_price = mid if mid is not None else fallback_price
+        mean_depth = self.lambda_ if lambda_ is None else lambda_
 
         #Exponentially distrbuted entry depth, lambda_ is the mean. expovariate(1/mean) draws from an exponential distribution about the given mean.
         #Arg is rate, hence 1/mean.
-        depth = r.expovariate(1.0/self.lambda_)
+        depth = r.expovariate(1.0/mean_depth)
 
         side = Side.BID if r.random() < self.q_provider else Side.ASK
         if side is Side.BID:
@@ -224,6 +231,12 @@ class MeanRevertingWalk(_LatticeWalk):
 
     def __init__(self, step: float = 0.001, half_width: float = 0.5, centre: float = 0.5):
         super().__init__(step, half_width, centre)
+
+    @property
+    def stationary_rms(self) -> float:
+        """sqrt(<(q - centre)^2>) once the walk has settled: sqrt(step/4). This is the value Eq. 4
+        divides by (paper Fig. 4). Derived in docs/decisions.md D19, and matched by the Fig. 3 runs (D20)."""
+        return (self.step / 4) ** 0.5
 
     def _direction(self, rng: random.Random) -> int:
         if self.k == 0:

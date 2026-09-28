@@ -104,6 +104,24 @@ symmetric about q = 1/2, so the distributions are symmetric too. Like the paper,
 four Δτ, which shows the bounded walk's distribution going from one peak (Δτ = 200) to two
 (Δτ = 800 and 1600).
 
+### Volatility-coupled entry depth (paper Fig. 4, Eq. 4; `depth_coupling` in `run_simulation`)
+
+**D21. Eq. 4, with the derived value of √⟨(q − 1/2)²⟩. [Paper, Assumed, Checked]**
+λ(t) = λ₀ (1 + |q_taker(t) − 1/2| / √⟨(q_taker − 1/2)²⟩ · C_λ), with λ₀ = 100 and C_λ = 10, on top of the
+mean-reverting walk, as in the paper. It is only allowed with that walk.
+
+The paper says the average in Eq. 4 is "determined separately before the main simulation", but gives
+no procedure. The derived value √(Δs/4) = 0.0158 (D19) is used. The Fig. 3 runs measured the same
+value (D20), so a separate calibration run is not needed.
+
+Each step, λ(t) is worked out from that step's q, and every provider in the step uses it. The takers
+use the same q (D17), so λ(t) and q_taker(t) always belong to the same step. The pre-opening uses λ₀.
+The λ used at every step is saved in `result.lambda_series`, and each run stores its mean and maximum.
+
+Checked: `tests/test_simulation.py` compares λ(t) with Eq. 4 at every step, and C_λ = 0 gives exactly
+the same run as the fixed depth. With C_λ = 10, λ(t) averages about 900 ticks and reaches about
+4,400 (trial runs), against a fixed 100 before.
+
 ---
 
 ## 2. Implementation choices that could change results
@@ -235,12 +253,21 @@ axis convention for panel (d) is unconfirmed. Kurtosis estimated from the binned
 2.7–2.9 (Gaussian = 3), rising with Δτ, so no fat tails in the symmetric model, as the paper reports.
 This is only approximate.
 
+**D22. Return bins reach 50,000 ticks, and anything beyond is counted. [Assumed, Checked]**
+The paper's Fig. 4b shows price changes out to ±4,000 ticks, close to the old 5,000-tick limit of the
+bins. So the bins now go to 50,000 ticks (about 11 bins per factor of 10, as before). Increments
+beyond the last bin would be left out of the histogram without any sign, so each run now also counts
+them, and the plotter warns if there are any. None so far. Results files made before this change keep
+their own bin edges, so they still plot correctly.
+
+For Fig. 4b the distribution is drawn as the paper does: signed Δp (made by mirroring, as in D20) on a
+linear axis in ticks/10³, against P(Δp) on a log axis. On these axes an exponential tail is a straight
+line. The same model without Eq. 4 can be added as dashed lines for comparison.
+
 ---
 
 ## 4. What has and has not been compared with the paper
 
-- The paper's *figures* have not been overlaid. Only its text was read programmatically; comparisons to
-  Figs. 2 and 3 rest on the user's readings of the PDF. An overlay or digitised curves would be stronger.
 - **Fig. 2, reproduced qualitatively at paper scale** (`fig2_final.png`, 10⁶ steps, 50 runs per N_A):
   price-path scale (±1000 ticks in 10⁶ steps), depth profile shape and its lognormal fit (D14),
   H(Δτ) anti-persistent at short lags with its minimum ≈ 0.08 near Δτ ≈ 10 and rising to ≈ 0.5 by
@@ -256,14 +283,16 @@ This is only approximate.
     Δτ ≈ 1–3×10⁴. Paper: closer to real markets, where H is at most about 0.6. The return distributions
     have one peak and a kurtosis of 2.75–2.95, close to Gaussian (3). Paper: approximately Gaussian.
   - In both, a larger N_A gives a higher peak H.
-- Not yet reproduced or checked: Fig. 4.
+- Fig. 4, trial only (10⁵ steps, 4 runs per N_A, median trade price; `results/fig4_trial.png`; D21, D22).
+  With Eq. 4 the return distributions have fat tails: at Δτ = 1600 they reach about ±4,000 ticks,
+  and the tails are close to straight lines on the semi-log plot (exponential), as in the paper.
+  Kurtosis is 5.5–8.8, against 2.7–2.9 for the same model with a fixed depth. H(Δτ) keeps the same
+  shape as in Fig. 3c (peak about 0.62–0.71 near Δτ ≈ 10³). Paper: "qualitatively the same". Not a
+  reproduction until the paper-scale run is done.
 
 ## 5. Still open
 
 - **Depth-profile fit (D14):** whether the paper fits each side separately or combined.
 - **Asymmetric flow (D16, D18):** the q_provider variant the paper mentions, and whether mirror vs
   blocked reflection matters.
-- **Eq. 4 (volatility-coupled depth):** the paper says ⟨(q_taker − ½)²⟩ is "determined separately
-  before the main simulation" but gives no procedure. Its value is now known: 2.50×10⁻⁴, both derived
-  (D19) and measured (D20). Which of the two to use still needs recording when Fig. 4 is built.
 - **Baseline tag:** tagging the finished baseline (`baseline-v1`) as the control model.

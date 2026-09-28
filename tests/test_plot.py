@@ -35,19 +35,33 @@ def quietly(fn, argv):
     return buffer.getvalue(), exit_message
 
 
-def make_results(folder, flow):
-    out = Path(folder) / f"{flow}.pkl"
-    _, error = quietly(run.main, ["--flow", flow, "--n-steps", str(STEPS), "--n-runs", "1",
-                                  "--workers", "3", "--out", str(out)])
+def make_results(folder, flow, depth_coupling=0):
+    out = Path(folder) / f"{flow}_c{depth_coupling}.pkl"
+    _, error = quietly(run.main, ["--flow", flow, "--depth-coupling", str(depth_coupling), "--n-steps", str(STEPS),
+                                  "--n-runs", "1", "--workers", "3", "--out", str(out)])
     assert error is None, error
     return out
 
 
-def test_both_figures_are_drawn_and_mismatched_files_refused():
+def test_all_figures_are_drawn_and_mismatched_files_refused():
     with tempfile.TemporaryDirectory() as tmp:
         symmetric = make_results(tmp, "symmetric")
         bounded = make_results(tmp, "bounded")
         reverting = make_results(tmp, "mean-reverting")
+        eq4 = make_results(tmp, "mean-reverting", depth_coupling=10)
+
+        fig4_png = Path(tmp) / "fig4.png"
+        text, error = quietly(plot.main, ["fig4", "--data", str(eq4), "--compare", str(reverting),
+                                          "--out", str(fig4_png)])
+        check("fig4 drawn, with the fixed-depth comparison", error is None and fig4_png.exists())
+        check("fig4 reports lambda(t) and the kurtosis with and without Eq. 4",
+              "lambda(t) averaged" in text and "(fixed depth:" in text)
+
+        _, error = quietly(plot.main, ["fig4", "--data", str(reverting), "--out", str(Path(tmp) / "wrong.png")])
+        check("fig4 from a file without Eq. 4 is refused", error is not None and "Eq. 4" in error)
+        _, error = quietly(plot.main, ["fig3", "--bounded", str(bounded), "--mean-reverting", str(eq4),
+                                       "--out", str(Path(tmp) / "wrong.png")])
+        check("fig3 from an Eq. 4 file is refused (it isn't the Fig. 3c model)", error is not None and "Eq. 4" in error)
 
         fig2_png = Path(tmp) / "fig2.png"
         _, error = quietly(plot.main, ["fig2", "--data", str(symmetric), "--out", str(fig2_png)])

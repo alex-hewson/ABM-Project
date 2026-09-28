@@ -68,6 +68,9 @@ class SimulationResult:
     # The buy probability q_taker used by that step's takers, one entry per step. Filled only if
     # run_simulation was given a taker_flow (asymmetric order flow); empty otherwise.
     q_taker_series: np.ndarray = field(default_factory=lambda: np.empty(0))
+    # The providers' mean entry depth lambda(t) used in each step. Filled only if run_simulation was
+    # given a depth_coupling above 0 (Eq. 4, paper Fig. 4); empty otherwise.
+    lambda_series: np.ndarray = field(default_factory=lambda: np.empty(0))
 
 
 def _accumulate_depth(book: OrderBook, depth_sum: Dict[int, int]) -> int:
@@ -123,6 +126,8 @@ def run_simulation(
     keep_trades: bool = True,
     record_trade_prices: bool = False,
     taker_flow: Optional[SideProbability] = None,
+    depth_coupling: float = 0.0,
+    q_rms: Optional[float] = None,
 ) -> SimulationResult:
     """
     Run the base Preis et al. model for n_steps, after a pre-opening
@@ -157,9 +162,21 @@ def run_simulation(
     step's takers use taker_flow.q; it then advances, so the first step uses its starting value
     (1/2). The values used are returned in result.q_taker_series. Pass a fresh flow object per run. 
     (Don't use the same one between simulations, as will start in different places)
+
+    depth_coupling (C_lambda in the paper's Eq. 4) makes the providers' mean entry depth change with the
+    order-flow imbalance: lambda(t) = lambda_ * (1 + |q(t) - 1/2| / q_rms * depth_coupling), where q(t)
+    is the takers' buy probability in that step and q_rms is sqrt(<(q - 1/2)^2>). 0 (the default) keeps
+    the depth fixed at lambda_. It needs a taker_flow and q_rms. Providers and takers in a step use the
+    same q(t). The values used are returned in result.lambda_series.
     """
     if method not in ("fast", "agents"):
         raise ValueError(f"method must be 'fast' or 'agents', got {method!r}")
+    if depth_coupling < 0:
+        raise ValueError("depth_coupling must be 0 or more")
+    if depth_coupling > 0 and taker_flow is None:
+        raise ValueError("depth_coupling needs a taker_flow: lambda(t) depends on the takers' q(t)")
+    if depth_coupling > 0 and not (q_rms and q_rms > 0):
+        raise ValueError("depth_coupling needs q_rms > 0, the value of sqrt(<(q - 1/2)^2>) in Eq. 4")
     fast = method == "fast"    #Checks which method has been selected
     check_stability_condition(alpha, mu, delta)
 
@@ -177,17 +194,19 @@ def run_simulation(
         for i in range(n_agents)
     ]
 
-    def providers_act(t: int) -> None:
+    def providers_act(t: int, lam: Optional[float] = None) -> None:
+        """lam, if not None, is this step's mean entry depth lambda(t) (Eq. 4); None means each
+        provider uses its own fixed lambda_."""
         if fast:
             #rng.sample(population, k) selects k unique elements from population w/o replacement
             #So binomial distribution of agents each with prob alpha, then gives number of active agents.
             #Then each selected agent submits an order.
             for i in rng.sample(range(n_agents), rng.binomialvariate(n_agents, alpha)):
-                providers[i].submit(book, t, p0, rng)
+                providers[i].submit(book, t, p0, rng, lambda_=lam)
         else:
             for p in providers:
                 #Each agent individually decided whether to submit
-                p.maybe_submit(book, timestamp=t, fallback_price=p0, rng=rng)
+                p.maybe_submit(book, timestamp=t, fallback_price=p0, rng=rng, lambda_=lam)
 
     def cancellation_sweep() -> None:
         if fast:
@@ -231,12 +250,18 @@ def run_simulation(
     depth_sum: Dict[int, int] = {}
     n_depth_snapshots = 0
     q_taker_series = np.empty(n_steps) if taker_flow is not None else np.empty(0)
+    lambda_series = np.empty(n_steps) if depth_coupling > 0 else np.empty(0)
 
     for t in range(pre_opening_steps, pre_opening_steps + n_steps):
         step = t - pre_opening_steps
-        providers_act(t)                        # 1. Providers act
+        q_now = taker_flow.q if taker_flow is not None else None     # this step's q, used all step
+        lambda_now = None
+        if depth_coupling > 0:                  # Eq. 4
+            lambda_now = lambda_ * (1 + abs(q_now - 0.5) / q_rms * depth_coupling)
+            lambda_series[step] = lambda_now
+
+        providers_act(t, lambda_now)            # 1. Providers act
         cancellation_sweep()                    # 2. Each resting order removed w.p. delta
-        q_now = taker_flow.q if taker_flow is not None else None
         n_match_failures += takers_act(t, q_now)    # 3. Takers act
         if taker_flow is not None:
             q_taker_series[step] = q_now
@@ -265,6 +290,7 @@ def run_simulation(
         n_depth_snapshots=n_depth_snapshots,
         trade_price_steps=trade_price_steps,
         q_taker_series=q_taker_series,
+        lambda_series=lambda_series,
     )
 
 

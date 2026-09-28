@@ -11,6 +11,8 @@ Eq. 1). At the paper's Fig. 2 parameters the two possible orders differ by only
 ~14% and the test can actually tell them apart.
 """
 
+import numpy as np
+
 from abm.orderbook import Side
 from abm.agents import ConstantSide, BoundedRandomWalk, MeanRevertingWalk
 from abm.simulation import run_simulation, check_stability_condition
@@ -225,6 +227,40 @@ def test_an_asymmetric_flow_still_gives_a_working_book():
                            n_steps=2_000, seed=6, taker_flow=flow)
         check(f"{type(flow).__name__}: no empty-book failures and trades happen",
               r.n_match_failures == 0 and r.n_trades > 0)
+
+
+def test_depth_coupling_zero_changes_nothing():
+    kwargs = dict(n_agents=60, alpha=0.15, mu=0.025, delta=0.025, lambda_=100, n_steps=300, seed=8)
+    for method in ("fast", "agents"):
+        plain = run_simulation(method=method, taker_flow=MeanRevertingWalk(), **kwargs)
+        zero = run_simulation(method=method, taker_flow=MeanRevertingWalk(), depth_coupling=0.0,
+                              q_rms=0.0158, **kwargs)
+        check(f"{method}: depth_coupling=0 gives an identical run", plain.mid_price_series == zero.mid_price_series)
+    check("no lambda series without coupling", len(zero.lambda_series) == 0)
+
+
+def test_lambda_follows_eq4_every_step():
+    flow = MeanRevertingWalk()
+    r = run_simulation(n_agents=60, alpha=0.15, mu=0.025, delta=0.025, lambda_=100, n_steps=2_000, seed=4,
+                       taker_flow=flow, depth_coupling=10, q_rms=flow.stationary_rms)
+    q, lam = r.q_taker_series, r.lambda_series
+    expected = 100 * (1 + abs(q - 0.5) / flow.stationary_rms * 10)
+    check("one lambda per step", len(lam) == 2_000)
+    check("lambda(t) = lambda_0 (1 + |q(t) - 1/2| / q_rms * C) at every step, using that step's q",
+          np.allclose(lam, expected))
+    check("first step: q = 1/2, so lambda = lambda_0", lam[0] == 100)
+    check(f"lambda varies over the run (up to {lam.max():.0f})", lam.max() > 200)
+    check("no empty-book failures", r.n_match_failures == 0)
+
+
+def test_depth_coupling_is_validated():
+    kwargs = dict(n_agents=10, alpha=0.15, mu=0.025, delta=0.025, lambda_=100, n_steps=10)
+    check("negative coupling rejected", raises_value_error(lambda: run_simulation(
+        taker_flow=MeanRevertingWalk(), depth_coupling=-1, q_rms=0.0158, **kwargs)))
+    check("coupling without a taker flow rejected (lambda(t) needs q(t))", raises_value_error(lambda: run_simulation(
+        depth_coupling=10, q_rms=0.0158, **kwargs)))
+    check("coupling without q_rms rejected", raises_value_error(lambda: run_simulation(
+        taker_flow=MeanRevertingWalk(), depth_coupling=10, **kwargs)))
 
 
 if __name__ == "__main__":

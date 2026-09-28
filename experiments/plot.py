@@ -4,8 +4,10 @@ Draw the paper's figures from results files saved by experiments/run.py.
     python -m experiments.plot fig2 --data results/fig2.pkl --out results/fig2.png
     python -m experiments.plot fig3 --bounded results/fig3_bounded.pkl \
                                     --mean-reverting results/fig3_mean_reverting.pkl --out results/fig3.png
+    python -m experiments.plot fig4 --data results/fig4.pkl --out results/fig4.png \
+                                    [--compare results/fig3_mean_reverting.pkl]
 
-Both take --price mid|last|first|median|mean for the Hurst and return-distribution panels
+All take --price mid|last|first|median|mean for the Hurst and return-distribution panels
 (default: median, the definition adopted for reported results; docs/decisions.md, D11).
 
 fig2   (a) mid-price path, (b) depth profile with lognormal fit, (c) H(delta tau), (d) |increment|
@@ -14,9 +16,13 @@ fig2   (a) mid-price path, (b) depth profile with lognormal fit, (c) H(delta tau
 fig3   (a)/(b) H(delta tau) and |increment| distributions for the bounded random walk,
        (c)/(d) the same for the mean-reverting walk. Each distribution panel has an inset showing the
        signed increments for every delta tau on linear axes, as in the paper (see plot_returns).
+fig4   (a) H(delta tau) and (b) signed increment distributions on a semi-log plot (Delta p in
+       ticks/10^3), for the mean-reverting walk with the Eq. 4 entry depth. On a semi-log plot,
+       exponential tails are straight lines. --compare adds the same run without Eq. 4 (the Fig. 3c/3d
+       file) to panel (b) as dashed lines, to show that the fat tails come from Eq. 4.
 
-Each command checks that the files it is given were made with the flow it expects, so e.g. a
-bounded-walk file can't be plotted as the mean-reverting one by mistake.
+Each command checks that the files it is given were made with the flow (and entry depth) it
+expects, so e.g. a bounded-walk file can't be plotted as the mean-reverting one by mistake.
 """
 
 from __future__ import annotations
@@ -39,9 +45,9 @@ from experiments.run import RESULTS_DIR, RESULTS_FORMAT, AGENT_COUNTS, PATH_AGEN
 from experiments.provenance import describe
 
 
-def load(path: Path, expected_flow: str) -> dict:
-    """Load a results file, refusing one made by an older version of run.py or with a different
-    order flow than the figure needs."""
+def load(path: Path, expected_flow: str, eq4: bool = False) -> dict:
+    """Load a results file, refusing one made by an older version of run.py, or with a different
+    order flow or entry depth than the figure needs (eq4: whether the Eq. 4 entry depth is expected)."""
     with open(path, "rb") as f:
         data = pickle.load(f)
     config = data["config"]
@@ -52,7 +58,20 @@ def load(path: Path, expected_flow: str) -> dict:
     flow = (config.get("flow") or {}).get("name", "symmetric")
     if flow != expected_flow:
         raise SystemExit(f"{path} was made with --flow {flow}, but this panel needs --flow {expected_flow}.")
+    has_eq4 = config.get("entry_depth") is not None
+    if has_eq4 != eq4:
+        raise SystemExit(f"{path} was made {'with' if has_eq4 else 'without'} the Eq. 4 entry depth "
+                         f"(--depth-coupling), but this panel needs it {'on' if eq4 else 'off'}.")
     return data
+
+
+def warn_about_overflow(runs, price, label):
+    """Increments too large for the last histogram bin are left out of the plotted distributions;
+    say so if there are any. (Results files made before this was counted have no count to check.)"""
+    lost = sum(n for r in runs for n in (r.get("return_overflow") or {}).get(price, {}).values())
+    if lost:
+        print(f"WARNING ({label}): {lost} increments were too large for the histogram bins and are missing "
+              f"from the plotted distributions.")
 
 
 def add_footer(fig, configs):
@@ -198,6 +217,7 @@ def figure2(args):
     plot_depth(axes[0, 1], runs, "(b) depth")
     plot_hurst(axes[1, 0], runs, args.price, "(c) Hurst exponent")
     plot_returns(axes[1, 1], runs, config["return_bin_edges"], args.price, "(d) |increments|")
+    warn_about_overflow(runs, args.price, "fig2")
     fig.suptitle(f"Fig. 2 reproduction: {config['n_steps']:,} steps, {config['n_runs']} runs per N$_A$")
     fig.tight_layout()
     add_footer(fig, [config])
@@ -213,7 +233,7 @@ def figure2(args):
 
 def figure3(args):
     bounded = load(args.bounded, "bounded")
-    reverting = load(args.mean_reverting, "mean-reverting")
+    reverting = load(args.mean_reverting, "mean-reverting", eq4=False)
 
     fig, axes = plt.subplots(2, 2, figsize=(11, 8))
     for row, (data, label, short, letters) in enumerate(((bounded, "bounded walk", "bounded", "ab"),
@@ -222,6 +242,7 @@ def figure3(args):
         plot_hurst(axes[row, 0], runs, args.price, f"({letters[0]}) H, {label}")
         plot_returns(axes[row, 1], runs, config["return_bin_edges"], args.price,
                      f"({letters[1]}) |$\\Delta$p|, {short}", signed_inset=True)
+        warn_about_overflow(runs, args.price, label)
 
         # <(q - 1/2)^2> per N_A, averaged over runs: the quantity Eq. 4 needs (decisions D17).
         for n_agents in AGENT_COUNTS:
@@ -242,6 +263,80 @@ def figure3(args):
     print(f"saved {args.out}")
 
 
+def plot_returns_semilog(ax, runs, bin_edges_by_price, price, title, compare=None):
+    """Signed increment distributions at N_A = DEPTH_AGENTS on a semi-log plot, as in the paper's Fig. 4b:
+    Delta p in ticks/10^3 on a linear axis, probability on a log axis, so an exponential tail is a straight
+    line. The signed density is made by mirroring the stored |Delta p| histogram (see plot_returns).
+    compare = (runs, bin edges by price) of the same model without Eq. 4, drawn as dashed lines."""
+    def draw(these_runs, edges_by_price, style, label_suffix):
+        bin_edges = edges_by_price[price]
+        centres = np.sqrt(bin_edges[:-1] * bin_edges[1:])
+        for colour, tau in enumerate(RETURN_TAUS):
+            counts = sum(r["return_counts"][price][tau] for r in these_runs
+                         if r["n_agents"] == DEPTH_AGENTS and tau in r["return_counts"][price])
+            if np.isscalar(counts) or counts.sum() == 0:
+                continue
+            dens = counts_to_density(counts, bin_edges) / 2          # per tick, each sign
+            keep = dens > 0
+            x = np.concatenate([-centres[keep][::-1], centres[keep]]) / 1000
+            y = np.concatenate([dens[keep][::-1], dens[keep]])
+            ax.plot(x, y, style, color=f"C{colour}", ms=3, lw=0.8,
+                    label=f"$\\Delta\\tau$={tau}{label_suffix}")
+
+    draw(runs, bin_edges_by_price, "o-", "")
+    if compare is not None:
+        draw(*compare, "--", " (fixed depth)")
+    ax.set(yscale="log", xlabel="$\\Delta$p [ticks / 10$^3$]", ylabel="P($\\Delta$p)",
+           title=f"{title}, N$_A$={DEPTH_AGENTS}, price = {price}")
+    ax.legend(fontsize=6, ncol=2 if compare is not None else 1)
+
+
+def approximate_kurtosis(runs, bin_edges, price, tau):
+    """Kurtosis of the signed increments (3 for a Gaussian), from the binned |Delta p| counts. Only
+    approximate, since every increment is placed at its bin centre."""
+    counts = sum(r["return_counts"][price][tau] for r in runs if r["n_agents"] == DEPTH_AGENTS).astype(float)
+    centres = np.sqrt(bin_edges[:-1] * bin_edges[1:])
+    p = counts / counts.sum()
+    return (p * centres ** 4).sum() / (p * centres ** 2).sum() ** 2
+
+
+def figure4(args):
+    data = load(args.data, "mean-reverting", eq4=True)
+    runs, config = data["runs"], data["config"]
+    compare = None
+    if args.compare is not None:
+        reference = load(args.compare, "mean-reverting", eq4=False)
+        compare = (reference["runs"], reference["config"]["return_bin_edges"])
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.8))
+    plot_hurst(axes[0], runs, args.price, "(a) H, mean-reverting walk + Eq. 4")
+    axes[0].set_ylim(0, 1)
+    plot_returns_semilog(axes[1], runs, config["return_bin_edges"], args.price, "(b) $\\Delta$p", compare)
+    warn_about_overflow(runs, args.price, "fig4")
+
+    depth = config["entry_depth"]
+    lam_means = [r["lambda_stats"]["mean"] for r in runs]
+    print(f"Eq. 4: lambda_0 = {depth['lambda_0']:g}, C_lambda = {depth['c_lambda']:g}, "
+          f"sqrt(<(q - 1/2)^2>) = {depth['q_rms']:.4f}; lambda(t) averaged {np.mean(lam_means):.0f} ticks "
+          f"(largest in any run: {max(r['lambda_stats']['max'] for r in runs):.0f})")
+    edges = config["return_bin_edges"][args.price]
+    for tau in RETURN_TAUS:
+        line = f"N_A={DEPTH_AGENTS}, delta tau={tau}: kurtosis ~ {approximate_kurtosis(runs, edges, args.price, tau):.2f}"
+        if compare is not None:
+            ref_edges = compare[1][args.price]
+            line += f" (fixed depth: {approximate_kurtosis(compare[0], ref_edges, args.price, tau):.2f})"
+        print(line + "   [Gaussian: 3]")
+
+    fig.suptitle(f"Fig. 4 reproduction: {config['n_steps']:,} steps, {config['n_runs']} runs per N$_A$, "
+                 f"C$_\\lambda$ = {depth['c_lambda']:g}")
+    fig.tight_layout()
+    add_footer(fig, [config] + ([reference["config"]] if compare is not None else []))
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(args.out, dpi=130)
+    plt.close(fig)
+    print(f"saved {args.out}")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     figures = parser.add_subparsers(dest="figure", required=True)
@@ -255,11 +350,17 @@ def main(argv=None):
     fig3.add_argument("--mean-reverting", type=Path, default=RESULTS_DIR / "mean-reverting.pkl")
     fig3.add_argument("--out", type=Path, default=RESULTS_DIR / "fig3.png")
 
-    for sub in (fig2, fig3):
+    fig4 = figures.add_parser("fig4", help="Fig. 4 (mean-reverting flow with the Eq. 4 entry depth)")
+    fig4.add_argument("--data", type=Path, default=RESULTS_DIR / "mean-reverting_c10.pkl")
+    fig4.add_argument("--compare", type=Path, default=None,
+                      help="the same model without Eq. 4 (the Fig. 3 mean-reverting file), drawn dashed in (b)")
+    fig4.add_argument("--out", type=Path, default=RESULTS_DIR / "fig4.png")
+
+    for sub in (fig2, fig3, fig4):
         sub.add_argument("--price", choices=PRICE_DEFINITIONS, default="median",
                          help="price definition for the Hurst and distribution panels")
     args = parser.parse_args(argv)
-    {"fig2": figure2, "fig3": figure3}[args.figure](args)
+    {"fig2": figure2, "fig3": figure3, "fig4": figure4}[args.figure](args)
 
 
 if __name__ == "__main__":

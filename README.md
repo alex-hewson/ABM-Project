@@ -68,8 +68,9 @@ python -m abm.simulation
 
 `experiments.run` runs one experiment: 50 independent runs for each of N_A = 125, 250, 500, spread
 over CPU cores. `--flow` chooses how the takers' buy probability behaves: `symmetric` (constant ½,
-Fig. 2; the default), `bounded` or `mean-reverting` (the two random walks of Fig. 3). Each flow is a
-separate experiment with its own results file. The paper-scale default (10⁶ steps, 50 runs per N_A)
+Fig. 2; the default), `bounded` or `mean-reverting` (the two random walks of Fig. 3).
+`--depth-coupling 10` adds the volatility-coupled entry depth of Eq. 4 (Fig. 4; mean-reverting flow
+only). Each setting is a separate experiment with its own results file. The paper-scale default (10⁶ steps, 50 runs per N_A)
 takes about 5–6 hours per flow on a 4-core laptop, so a small trial first is advisable:
 
 ```
@@ -85,6 +86,14 @@ python -m experiments.run --flow mean-reverting --out results/fig3_mean_revertin
 python -m experiments.plot fig3 --bounded results/fig3_bounded.pkl --mean-reverting results/fig3_mean_reverting.pkl --out results/fig3.png
 ```
 
+Fig. 4 needs one more experiment; `--compare` adds the Fig. 3 mean-reverting results (fixed entry
+depth) to the distribution panel as dashed lines:
+
+```
+python -m experiments.run --flow mean-reverting --depth-coupling 10 --out results/fig4.pkl
+python -m experiments.plot fig4 --data results/fig4.pkl --compare results/fig3_mean_reverting.pkl --out results/fig4.png
+```
+
 The paper does not say which "price" it uses, so each run stores results for five definitions
 (`mid`, `last`, `first`, `median`, `mean`). The plots use the median trade price by default
 (`docs/decisions.md`, D11); `--price mid` etc. selects another. `plot fig2` also saves a second
@@ -94,7 +103,7 @@ Each run is saved as soon as it finishes (in `<name>.pkl.parts/`), so an interru
 (sleep, crash, power cut) loses at most the runs in progress. To continue, repeat the same
 command with `--resume`; already-saved runs are skipped. `--resume` also extends a finished
 experiment: run 10 seeds now, then rerun with `--n-runs 50 --resume` to add the other 40. It
-refuses if the settings, the flow or the code version differ from the saved runs
+refuses if the settings, the flow, the entry depth or the code version differ from the saved runs
 (`--allow-code-change` overrides the code check when the change is known not to affect the
 simulation). If a run fails or the experiment is stopped with Ctrl+C, the runs still queued are
 cancelled at once rather than run to completion.

@@ -119,7 +119,7 @@ def test_resume_reuses_saved_runs_and_finishes():
         parts = parts_dir_for(out)
         # Simulate an interruption after one run finished.
         save_meta(parts, run.make_config(STEPS, git_info()))
-        saved = run.run_one((125, 0, STEPS, "symmetric"))
+        saved = run.run_one((125, 0, STEPS, "symmetric", 0.0))
         saved["mean_orders"] = MARKER
         save_part(parts, (125, 0), saved)
 
@@ -193,6 +193,19 @@ def test_resume_refuses_a_different_order_flow():
         still_there = has_parts(parts)
     check("bounded-walk runs can't be continued as mean-reverting: refused, naming 'flow'",
           error is not None and "flow" in error)
+    check("saved runs untouched", still_there)
+
+
+def test_resume_refuses_a_different_entry_depth():
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "r.pkl"
+        parts = parts_dir_for(out)
+        save_meta(parts, run.make_config(STEPS, git_info(), "mean-reverting", 10))
+        save_part(parts, (125, 0), {"n_agents": 125, "seed": 0, "mean_orders": MARKER})
+        text, error = run_main(out, "--resume", "--flow", "mean-reverting")        # no --depth-coupling
+        still_there = has_parts(parts)
+    check("runs made with Eq. 4 can't be continued without it: refused, naming 'entry_depth'",
+          error is not None and "entry_depth" in error)
     check("saved runs untouched", still_there)
 
 

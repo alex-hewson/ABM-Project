@@ -20,6 +20,8 @@ repository in OneDrive `Work/ABM/Papers/`).
 - Asymmetric order flow: shared, time-varying q_taker, bounded and mean-reverting walks (D16–D19)
 - One experiment runner and one plotter for both figures (`experiments/run.py --flow ...`,
   `experiments/plot.py fig2|fig3`) (D20)
+- Volatility-coupled entry depth (Eq. 4), runner option `--depth-coupling` and `plot.py fig4`
+  (D21, D22); a Fig. 4 trial at 10⁵ steps matches the paper qualitatively
 - **Fig. 3 reproduced qualitatively at paper scale**: `results/fig3_bounded.pkl`,
   `results/fig3_mean_reverting.pkl`, `results/fig3_final.png`, 10⁶ steps, 50 runs per N_A,
   commit a65a28c (`decisions.md`, section 4)
@@ -36,7 +38,6 @@ Each is described in `decisions.md`:
 - Whether the paper's lognormal fit is per side or combined (D14)
 - The q_provider variant of asymmetric flow, not implemented (D16)
 - Mirrored vs blocked reflection in the bounded walk, untested (D18)
-- Eq. 4: whether to use the derived or the measured value of ⟨(q−½)²⟩ (they agree; D19, D20)
 
 ---
 
@@ -56,11 +57,11 @@ This is the methodological foundation — everything built later is compared aga
 3. ~~**Add asymmetric order flow (Fig. 3)**~~ (done at paper scale, `fig3_final`; D16–D20)
    - 3a. Bounded random walk (Δs=0.001, S=0.05): H peaks at 0.80–0.87 near Δτ ≈ 10³; returns bimodal
    - 3c. Mean-reverting walk (Δs=0.001, S=½): H peaks at 0.56–0.63; returns close to Gaussian
-4. **Add volatility-coupled entry depth (Eq. 4, Fig. 4)**
+4. **Add volatility-coupled entry depth (Eq. 4, Fig. 4)** — model, runner and plot done (D21, D22);
+   a trial matches the paper qualitatively. **Still to do:** the paper-scale run (about 6 hours).
    - λ(t) = λ₀ · (1 + |q_taker(t)−½| / √⟨(q_taker−½)²⟩ · C_λ), λ₀=100, C_λ=10
    - ⟨(q−½)²⟩ is "determined separately before the main simulation"; the paper gives no
-     procedure. Its value is 2.50×10⁻⁴, derived (D19) and measured on the Fig. 3 runs (D20), so no
-     separate calibration run is needed.
+     procedure. The derived value √(Δs/4) = 0.0158 is used (D21); the Fig. 3 runs measured the same.
    - Expected: H(Δτ) qualitatively unchanged, but distinct fat tails (exponential tails on a
      semi-log plot) in P(Δp), confirming fat tails only appear with this feedback mechanism
 5. **Checkpoint / write-up**
@@ -130,5 +131,6 @@ Test regulatory levers against the model, following Jacob Leal & Napoletano:
 
 ## Immediate next steps
 
-1. Eq. 4 / Fig. 4 (volatility-coupled entry depth).
-2. Tag `baseline-v1` once Figs. 2–4 are reproduced.
+1. Commit the Fig. 4 work (on a new branch).
+2. Run the paper-scale Fig. 4 experiment (command in `README.md`), then plot.
+3. If Fig. 4 is reproduced, merge into `main` and tag `baseline-v1`.

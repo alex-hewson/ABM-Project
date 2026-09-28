@@ -202,6 +202,28 @@ def raises_value_error(fn, *args, **kwargs):
     return False
 
 
+def test_provider_uses_an_overriding_depth_when_given():
+    """The Eq. 4 entry depth reaches providers as a per-order override of their own lambda_."""
+    p = LiquidityProvider(agent_id=0, alpha=1.0, q_provider=1.0, lambda_=100)
+    rng = random.Random(10)
+    n = 20_000
+    total = 0
+    for t in range(n):
+        b = OrderBook()
+        p.submit(b, t, P0, rng, lambda_=1000)
+        total += P0 - next(iter(b.bids))
+    mean_depth = total / n
+    # standard error of the mean is ~ 1000/sqrt(20000) = 7
+    check(f"override lambda_=1000: mean entry depth {mean_depth:.0f} within 30 of 1000", abs(mean_depth - 1000) < 30)
+    check("the agent's own lambda_ is unchanged", p.lambda_ == 100)
+
+
+def test_mean_reverting_walk_reports_its_settled_spread():
+    check("stationary_rms is sqrt(step/4) (D19): 0.0158 for step 0.001",
+          abs(MeanRevertingWalk().stationary_rms - (0.001 / 4) ** 0.5) < 1e-15)
+    check("and scales with the step", abs(MeanRevertingWalk(step=0.004).stationary_rms - 0.001 ** 0.5) < 1e-15)
+
+
 def test_taker_uses_an_overriding_q_when_given():
     def one_market_order(agent_q, override):
         book = OrderBook()
