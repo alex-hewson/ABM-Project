@@ -119,8 +119,8 @@ use the same q (D17), so λ(t) and q_taker(t) always belong to the same step. Th
 The λ used at every step is saved in `result.lambda_series`, and each run stores its mean and maximum.
 
 Checked: `tests/test_simulation.py` compares λ(t) with Eq. 4 at every step, and C_λ = 0 gives exactly
-the same run as the fixed depth. With C_λ = 10, λ(t) averages about 900 ticks and reaches about
-4,400 (trial runs), against a fixed 100 before.
+the same run as the fixed depth. With C_λ = 10, λ(t) averages about 900 ticks and reaches at most
+5,792 (paper-scale run), against a fixed 100 before.
 
 ---
 
@@ -257,7 +257,7 @@ This is only approximate.
 The paper's Fig. 4b shows price changes out to ±4,000 ticks, close to the old 5,000-tick limit of the
 bins. So the bins now go to 50,000 ticks (about 11 bins per factor of 10, as before). Increments
 beyond the last bin would be left out of the histogram without any sign, so each run now also counts
-them, and the plotter warns if there are any. None so far. Results files made before this change keep
+them, and the plotter warns if there are any. None so far, including the paper-scale Fig. 4 run. Results files made before this change keep
 their own bin edges, so they still plot correctly.
 
 For Fig. 4b the distribution is drawn as the paper does: signed Δp (made by mirroring, as in D20) on a
@@ -283,12 +283,29 @@ line. The same model without Eq. 4 can be added as dashed lines for comparison.
     Δτ ≈ 1–3×10⁴. Paper: closer to real markets, where H is at most about 0.6. The return distributions
     have one peak and a kurtosis of 2.75–2.95, close to Gaussian (3). Paper: approximately Gaussian.
   - In both, a larger N_A gives a higher peak H.
-- Fig. 4, trial only (10⁵ steps, 4 runs per N_A, median trade price; `results/fig4_trial.png`; D21, D22).
-  With Eq. 4 the return distributions have fat tails: at Δτ = 1600 they reach about ±4,000 ticks,
-  and the tails are close to straight lines on the semi-log plot (exponential), as in the paper.
-  Kurtosis is 5.5–8.8, against 2.7–2.9 for the same model with a fixed depth. H(Δτ) keeps the same
-  shape as in Fig. 3c (peak about 0.62–0.71 near Δτ ≈ 10³). Paper: "qualitatively the same". Not a
-  reproduction until the paper-scale run is done.
+- **Fig. 4, reproduced at paper scale** (`fig4.png`, 10⁶ steps, 50 runs per N_A, commit acd8ebe,
+  median trade price; D21, D22). λ(t) averaged 898 ticks, with a maximum of 5,792 in any run.
+  - Return distributions (N_A = 500) have fat, exponential tails: straight lines on the semi-log plot.
+    Kurtosis is 9.4 / 9.3 / 8.4 / 6.9 for Δτ = 200 / 400 / 800 / 1600, against 2.75–2.95 for the same
+    model with a fixed depth. The tail widths match readings taken from the paper's Fig. 4b by eye:
+
+    | Δτ | Paper (by eye) | Here |
+    |---|---|---|
+    | 200 | reaches 10⁻⁷ at Δp ≈ 2,000–2,500 | 2,170 |
+    | 400 | reaches 10⁻⁷ at Δp ≈ 3,000–3,500 | 3,160 |
+    | 800 | P(4,000) about halfway between 10⁻⁶ and 10⁻⁷ | 3.5×10⁻⁷ |
+    | 1600 | P(4,000) between 10⁻⁵ and 10⁻⁶, closer to 10⁻⁵ | 2.6×10⁻⁶ |
+
+    Only Δτ = 1600 is a little low, by less than a factor of 2. The paper's curves look noisy because
+    it seems to plot every Δp value; the log bins here (D22) average neighbouring values, so the
+    curves are smooth.
+  - H(Δτ) has the same shape as in Fig. 3c, with a higher peak: 0.62 / 0.66 / 0.70 (N_A = 125 / 250 /
+    500) near Δτ ≈ 600–800, against 0.56 / 0.60 / 0.63 without Eq. 4. The paper's Fig. 4a peak is also
+    slightly higher than its Fig. 3c peak (above 0.7 against just under 0.7). Its peaks are a little
+    higher than the ones here. With the mid-price (D11) the peaks are 0.67 (Fig. 3c) and 0.74
+    (Fig. 4a) for N_A = 500, closer to the paper's. So the median trade price, chosen to match
+    Fig. 2c at short lags, may slightly lower the peak heights. This is a small offset and does not
+    change any conclusion.
 
 ## 5. Still open
 

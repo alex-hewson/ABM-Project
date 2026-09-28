@@ -20,15 +20,17 @@ repository in OneDrive `Work/ABM/Papers/`).
 - Asymmetric order flow: shared, time-varying q_taker, bounded and mean-reverting walks (D16–D19)
 - One experiment runner and one plotter for both figures (`experiments/run.py --flow ...`,
   `experiments/plot.py fig2|fig3`) (D20)
-- Volatility-coupled entry depth (Eq. 4), runner option `--depth-coupling` and `plot.py fig4`
-  (D21, D22); a Fig. 4 trial at 10⁵ steps matches the paper qualitatively
 - **Fig. 3 reproduced qualitatively at paper scale**: `results/fig3_bounded.pkl`,
   `results/fig3_mean_reverting.pkl`, `results/fig3_final.png`, 10⁶ steps, 50 runs per N_A,
   commit a65a28c (`decisions.md`, section 4)
+- Volatility-coupled entry depth (Eq. 4), runner option `--depth-coupling` and `plot.py fig4` (D21, D22)
+- **Fig. 4 reproduced at paper scale**: `results/fig4.pkl` / `.png`, 10⁶ steps, 50 runs per N_A,
+  commit acd8ebe; fat exponential tails whose widths match the paper's Fig. 4b (`decisions.md`,
+  section 4)
 
 Code layout and how to run things: see `README.md`.
 
-**Git:** `main` holds Figs. 2 and 3. The project folder is the repository root, so a clone gives the
+**Git:** `main` holds Figs. 2 and 3; Fig. 4 is on branch `fig4-entry-depth`. The project folder is the repository root, so a clone gives the
 project directly, with one README.
 
 ## Open questions
@@ -57,80 +59,30 @@ This is the methodological foundation — everything built later is compared aga
 3. ~~**Add asymmetric order flow (Fig. 3)**~~ (done at paper scale, `fig3_final`; D16–D20)
    - 3a. Bounded random walk (Δs=0.001, S=0.05): H peaks at 0.80–0.87 near Δτ ≈ 10³; returns bimodal
    - 3c. Mean-reverting walk (Δs=0.001, S=½): H peaks at 0.56–0.63; returns close to Gaussian
-4. **Add volatility-coupled entry depth (Eq. 4, Fig. 4)** — model, runner and plot done (D21, D22);
-   a trial matches the paper qualitatively. **Still to do:** the paper-scale run (about 6 hours).
+4. ~~**Add volatility-coupled entry depth (Eq. 4, Fig. 4)**~~ (done at paper scale, `fig4`; D21, D22)
    - λ(t) = λ₀ · (1 + |q_taker(t)−½| / √⟨(q_taker−½)²⟩ · C_λ), λ₀=100, C_λ=10
    - ⟨(q−½)²⟩ is "determined separately before the main simulation"; the paper gives no
      procedure. The derived value √(Δs/4) = 0.0158 is used (D21); the Fig. 3 runs measured the same.
-   - Expected: H(Δτ) qualitatively unchanged, but distinct fat tails (exponential tails on a
-     semi-log plot) in P(Δp), confirming fat tails only appear with this feedback mechanism
+   - Result: H(Δτ) the same shape as Fig. 3c with a slightly higher peak (as in the paper), and fat
+     exponential tails in P(Δp) (kurtosis 6.9–9.4, against 2.75–2.95 without Eq. 4)
 5. **Checkpoint / write-up**
    - Document the reproduction as validation in the methodology chapter
    - Freeze and tag this version (git tag `baseline-v1`) as the control model for later comparison
 
 ---
 
-## Phase 2: HFT extension
+## Phase 2: Large sell orders and flash crashes
 
-**Goal:** introduce agents and mechanisms that can plausibly generate the kind
-of instability seen in real HFT-dominated markets (e.g. the May 2010 Flash Crash).
-
-1. **Decide on the core instability mechanism first**, before writing agent code.
-   Options discussed:
-   - HF momentum/liquidity-taking agents reacting to short-term trend or order
-     flow imbalance (event-driven, not clock-driven)
-   - HF market makers with inventory limits who withdraw liquidity under stress
-     (closer to the empirical Flash Crash narrative — liquidity vacuum, not just
-     aggressive selling)
-   - Some combination of both
-   - **This choice determines the thesis's actual contribution**, so it should be treated
-     as a discrete decision point. Jacob Leal et al. and Paddrik et al. are to be read side by side
-     before committing.
-2. **Implement the chosen HF agent type(s)**
-   - Event-driven activation (reacts to price/order-flow changes, not fixed rate)
-   - Fast cancellation behavior
-   - These agents cannot use the fast method's aggregation (D8), so they need a per-agent loop
-3. **Integrate into the simulation loop**
-   - Likely a hybrid: LF agents on the clock-based loop, HF agents event-driven within/between steps
-4. **Sanity-check stability**
-   - Re-verify the α* > μ condition (or its HFT-era equivalent) still holds
-   - Confirm any observed "instability" isn't just a parameter/bug artifact —
-     compare against the Phase 1 baseline under matched non-HFT parameters
-
----
-
-## Phase 3: Instability metrics & experiments
-
-1. Implement metrics: realized volatility, book depth over time, extreme-event
-   frequency (Paddrik et al.'s events/day metric), cancellation-to-execution ratio
-2. Run controlled comparisons: baseline model vs. HFT-augmented model, same
-   underlying LF order flow parameters
-3. Identify and characterize the destabilizing mechanism concretely (what
-   specifically triggers a flash-crash-like event in the model?)
-
----
-
-## Phase 4: Policy experiments (if time allows)
-
-Test regulatory levers against the model, following Jacob Leal & Napoletano:
-- Minimum resting time for limit orders
-- Cancellation fees
-- Circuit breakers
-- Transaction taxes (Tobin-style)
-
----
-
-## Phase 5: Calibration & write-up
-
-- If real market data is available (e.g. LOBSTER), calibrate order flow rates
-  and compare simulated stylized facts against real depth/volatility data
-- Consolidate results, methodology, and validation (Phase 1 checkpoint) into
-  thesis chapters
+Planned in `phase2_plan.md`: a large seller and intermediaries with inventory limits are added to the
+Phase 1 model, based on Kirilenko et al. (2017). Four steps: large seller only; intermediaries with
+limited capacity; fast and slow intermediaries; interventions such as a trading pause. The earlier
+Phase 2–5 outline in this file is replaced by that plan.
 
 ---
 
 ## Immediate next steps
 
-1. Commit the Fig. 4 work (on a new branch).
-2. Run the paper-scale Fig. 4 experiment (command in `README.md`), then plot.
-3. If Fig. 4 is reproduced, merge into `main` and tag `baseline-v1`.
+1. Commit the Fig. 4 results and the Phase 2 plan, merge `fig4-entry-depth` into `main`, and tag
+   `baseline-v1`.
+2. Discuss `phase2_plan.md` at the first supervisor meeting.
+3. Phase 2, step 1: decide the crash definition, then add the large seller.
