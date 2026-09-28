@@ -26,8 +26,8 @@ repository in OneDrive `Work/ABM/Papers/`).
 
 Code layout and how to run things: see `README.md`.
 
-**Git:** `main` holds the finished Fig. 2 baseline (393cdee). Fig. 3 is finished on
-`fig3-asymmetric-flow` and ready to merge into `main`.
+**Git:** `main` holds Figs. 2 and 3. The project folder is the repository root, so a clone gives the
+project directly, with one README.
 
 ## Open questions
 Each is described in `decisions.md`:
@@ -130,8 +130,5 @@ Test regulatory levers against the model, following Jacob Leal & Napoletano:
 
 ## Immediate next steps
 
-1. Commit the Fig. 3 results and plot changes on `fig3-asymmetric-flow`.
-2. Merge `fig3-asymmetric-flow` into `main`.
-3. Move the project up to the repository root, so there is one README and no double
-   `ABM-Project\ABM-Project` folder in clones (agreed for after Fig. 3).
-4. Eq. 4 / Fig. 4, then tag `baseline-v1` once Figs. 2–4 are reproduced.
+1. Eq. 4 / Fig. 4 (volatility-coupled entry depth).
+2. Tag `baseline-v1` once Figs. 2–4 are reproduced.
