@@ -1,12 +1,45 @@
 # HFT / Order-Book Agent-Based Model
 
 An agent-based model of a limit order book, built on Preis, Golke, Paul & Schneider (2006),
-"Multi-agent-based Order Book Model of financial markets", *EPL* 75, 510. The plan is to
-reproduce that paper as a validated baseline, then extend it with high-frequency trading
-agents to study market instability (e.g. the May 2010 Flash Crash).
+"Multi-agent-based Order Book Model of financial markets", *EPL* 75, 510. The paper is first
+reproduced as a validated baseline. The baseline is then used to study flash crashes: when a large
+sell order turns into a crash, and what stops it.
 
-Current status and next steps are in [docs/project_plan.md](docs/project_plan.md); the reasoning
-behind each modelling and measurement choice is in [docs/decisions.md](docs/decisions.md).
+## Status
+
+- **Phase 1 (done):** Figs. 2, 3 and 4 of the paper reproduced at paper scale (10⁶ steps, 50 runs
+  per N_A). See [Results](#results). This version is tagged `baseline-v1`.
+- **Phase 2 (next):** add a large sell algorithm and a few intermediaries with inventory limits,
+  following Kirilenko et al. (2017) on the May 2010 Flash Crash. Then compare fast (HFT-like) and
+  slow (market-maker-like) intermediaries, and test interventions such as a trading pause.
+  See [docs/phase2_plan.md](docs/phase2_plan.md).
+
+Status and next steps are in [docs/project_plan.md](docs/project_plan.md). The reasoning behind
+each modelling and measurement choice is in [docs/decisions.md](docs/decisions.md).
+
+## Results
+
+The paper does not say which price it uses. The median trade price in each step is used here,
+because it matches the paper's Fig. 2c best ([decisions.md](docs/decisions.md), D11).
+
+**Fig. 2: basic model.** At long time lags the price moves like a random walk (Hurst exponent
+H → 0.5). At short lags it is anti-persistent, with H down to about 0.08 near Δτ ≈ 10. The order
+book depth has a lognormal-like shape, and price changes have no fat tails. All as in the paper.
+
+![Fig. 2 reproduction](docs/figures/fig2.png)
+
+**Fig. 3: trends in order flow.** The takers' buy probability follows a random walk. This pushes H
+above 0.5 near Δτ ≈ 10³: up to 0.87 for the bounded walk (paper: up to 0.9) and 0.63 for the
+mean-reverting walk. The bounded walk gives two-peaked price-change distributions, as in the paper.
+
+![Fig. 3 reproduction](docs/figures/fig3.png)
+
+**Fig. 4: fat tails.** Linking order placement depth to the trend (the paper's Eq. 4) gives fat,
+exponential tails (straight lines on the semi-log plot). Without it they are close to Gaussian (dashed
+lines). The tail widths match the paper's Fig. 4b to within reading error: for example, at
+Δτ = 200 the curve reaches 10⁻⁷ at about 2,200 ticks (paper: 2,000–2,500).
+
+![Fig. 4 reproduction](docs/figures/fig4.png)
 
 ## Layout
 
@@ -14,14 +47,12 @@ behind each modelling and measurement choice is in [docs/decisions.md](docs/deci
 |---|---|
 | `abm/` | The model: `orderbook.py` (matching engine), `agents.py` (liquidity providers / takers, and the asymmetric order-flow processes), `simulation.py` (step loop, runs agents through orderbook) |
 | `analysis/` | Measurements on one simulation's output: `prices.py` (price series), `hurst.py` (Hurst exponent), `returns.py` (return distributions), `depth_profile.py` (depth profile + lognormal fit) |
-| `experiments/` | Reproducing the paper's figures: `run.py` (runs many simulations and saves the results), `plot.py` (draws Fig. 2 or Fig. 3 from saved results); `checkpoint.py` and `provenance.py` are support code these two use, not called directly |
-| `tests/` | One test file per file above — twice the file count, but nothing beyond what it tests |
-| `docs/` | `project_plan.md` (status and next steps), `decisions.md` (assumptions and choices to note in the thesis) |
+| `experiments/` | Reproducing the paper's figures: `run.py` (runs many simulations and saves the results), `plot.py` (draws Fig. 2, 3 or 4 from saved results); `checkpoint.py` and `provenance.py` are support code these two use, not called directly |
+| `tests/` | One test file per file above |
+| `docs/` | `project_plan.md` (status and next steps), `decisions.md` (assumptions and choices to note in the thesis), `phase2_plan.md` (draft plan for the flash-crash work), `figures/` (the final plots shown above) |
 | `results/` | Generated data and plots (not tracked by git) |
 
 ## Pipeline of results
-
-It is a pipeline, each stage feeding the next, not an unordered pile of files:
 
 ```
 abm/simulation.py        runs ONE simulation -> a SimulationResult
@@ -108,10 +139,10 @@ refuses if the settings, the flow, the entry depth or the code version differ fr
 simulation). If a run fails or the experiment is stopped with Ctrl+C, the runs still queued are
 cancelled at once rather than run to completion.
 
-Note for PowerShell: do not pipe the runner's output through `Select-Object -First N`. That closes
-the output after N lines, which stops the runner at its next progress message.
-
 ## Requirements
 
 Python 3.12+ (the fast simulation method uses `random.binomialvariate`) with `numpy`, `matplotlib`
 and `pytest`.
+
+Note for PowerShell: do not pipe the runner's output through `Select-Object -First N`. That closes
+the output after N lines, which stops the runner at its next progress message.
