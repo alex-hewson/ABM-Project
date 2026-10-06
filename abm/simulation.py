@@ -34,7 +34,8 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from abm.orderbook import OrderBook, Side, OrderResult
-from abm.agents import LiquidityProvider, LiquidityTaker, SideProbability
+from abm.agents import LiquidityProvider, LiquidityTaker
+from abm.buy_probability import SideProbability
 
 
 @dataclass
@@ -157,7 +158,7 @@ def run_simulation(
     saves a lot of memory in long runs (result.book.trades is then empty;
     result.n_trades still counts the trades).
 
-    taker_flow (see agents.py) makes the takers' buy probability a shared, time-varying value
+    taker_flow (see buy_probability.py) makes the takers' buy probability a shared, time-varying value
     (asymmetric order flow, paper Fig. 3) instead of the fixed q_taker, which is then ignored. Each
     step's takers use taker_flow.q; it then advances, so the first step uses its starting value
     (1/2). The values used are returned in result.q_taker_series. Pass a fresh flow object per run. 

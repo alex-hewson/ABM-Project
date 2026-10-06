@@ -48,7 +48,7 @@ from typing import Optional
 
 import numpy as np
 
-from abm.agents import BoundedRandomWalk, MeanRevertingWalk
+from abm.buy_probability import BoundedRandomWalk, MeanRevertingWalk
 from abm.simulation import run_simulation
 from analysis.hurst import log_spaced_taus, rms_at_lags
 from analysis.prices import PRICE_DEFINITIONS, price_series

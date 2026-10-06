@@ -54,7 +54,7 @@ the midpoint), so this hardly affects results.
 [Paper, Assumed]** The paper uses a book with 2×10⁶ price ticks; the tick grid here is not bounded.
 Prices stay within a few thousand ticks of the start, so this should not matter.
 
-### Asymmetric order flow (paper Fig. 3; `abm/agents.py`, `taker_flow` in `run_simulation`)
+### Asymmetric order flow (paper Fig. 3; `abm/buy_probability.py`, `taker_flow` in `run_simulation`)
 
 **D16. One market-wide q_taker(t), shared by every taker in a step; q_provider is left alone.
 [Paper, Assumed]** The paper describes "a random walk of the variable q_taker", a single variable, so all
@@ -80,7 +80,7 @@ are exact comparisons, and S must be a whole multiple of Δs (otherwise an error
 At exactly q = 1/2 there is no "toward", so a fair coin is used (the paper doesn't say). *Derived, and
 verified by test and simulation:* this is a discrete Ornstein–Uhlenbeck process. The average pull is
 2Δs·(q − 1/2) per step, so q settles to a standard deviation of √(Δs/4) = 0.0158 (simulated: 0.0150,
-`tests/test_agents.py` checks it within 15%) and forgets its history over about 1/(2Δs) = 500 steps.
+`tests/test_buy_probability.py` checks it within 15%) and forgets its history over about 1/(2Δs) = 500 steps.
 So the S = 1/2 bound is effectively never reached. The 500-step memory also fits the paper-scale
 Fig. 3c: H is above 1/2 from about Δτ ≈ 300 to 10⁴, with its peak near Δτ ≈ 10³.
 

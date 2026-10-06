@@ -280,6 +280,7 @@ class OrderBook:
             if is_market_order:
                 crosses = True  #Market order always crosses the spread, since it just executes at the best available price
             else:
+                assert price is not None
                 crosses = (price >= best_opposite) if side is Side.BID else (price <= best_opposite) #Checks if limit order crosses the spread, True if it does, False if it doesn't.
 
             if not crosses:

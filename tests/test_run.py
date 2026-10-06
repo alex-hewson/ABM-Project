@@ -11,7 +11,7 @@ import numpy as np
 
 from experiments.run import (make_bin_edges, make_flow, describe_flow, make_config, run_one,
                              RETURN_BIN_EDGES, PRICE_DEFINITIONS, FLOWS)
-from abm.agents import BoundedRandomWalk, MeanRevertingWalk
+from abm.buy_probability import BoundedRandomWalk, MeanRevertingWalk
 
 
 def check(label, condition):

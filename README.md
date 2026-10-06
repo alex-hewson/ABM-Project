@@ -45,7 +45,7 @@ lines). The tail widths match the paper's Fig. 4b to within reading error: for e
 
 | Folder | Contents |
 |---|---|
-| `abm/` | The model: `orderbook.py` (matching engine), `agents.py` (liquidity providers / takers, and the asymmetric order-flow processes), `simulation.py` (step loop, runs agents through orderbook) |
+| `abm/` | The model: `orderbook.py` (matching engine), `agents.py` (liquidity providers / takers), `buy_probability.py` (how the takers' buy probability changes over time, Figs. 3 and 4), `simulation.py` (step loop, runs agents through orderbook) |
 | `analysis/` | Measurements on one simulation's output: `prices.py` (price series), `hurst.py` (Hurst exponent), `returns.py` (return distributions), `depth_profile.py` (depth profile + lognormal fit) |
 | `experiments/` | Reproducing the paper's figures: `run.py` (runs many simulations and saves the results), `plot.py` (draws Fig. 2, 3 or 4 from saved results); `checkpoint.py` and `provenance.py` are support code these two use, not called directly |
 | `tests/` | One test file per file above |
@@ -73,7 +73,7 @@ experiments/plot.py       reads saved .pkl files, draws a figure
 ```
 
 Suggested reading order for the code: `abm/orderbook.py` first (what one order book does), then
-`abm/agents.py` and `abm/simulation.py` (what runs on top of it), then whichever
+`abm/agents.py`, `abm/buy_probability.py` and `abm/simulation.py` (what runs on top of it), then whichever
 `analysis/*.py` file matches the quantity of interest. `experiments/` only
 orchestrates those pieces at scale — there is no separate model logic there.
 

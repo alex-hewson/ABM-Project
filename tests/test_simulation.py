@@ -14,7 +14,7 @@ Eq. 1). At the paper's Fig. 2 parameters the two possible orders differ by only
 import numpy as np
 
 from abm.orderbook import Side
-from abm.agents import ConstantSide, BoundedRandomWalk, MeanRevertingWalk
+from abm.buy_probability import ConstantSide, BoundedRandomWalk, MeanRevertingWalk
 from abm.simulation import run_simulation, check_stability_condition
 
 
