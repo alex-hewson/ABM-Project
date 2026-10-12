@@ -115,7 +115,8 @@ class MeanRevertingWalk(_LatticeWalk):
     @property
     def stationary_rms(self) -> float:
         """sqrt(<(q - centre)^2>) once the walk has settled: sqrt(step/4). This is the value Eq. 4
-        divides by (paper Fig. 4). Derived in docs/decisions.md D19, and matched by the Fig. 3 runs (D20)."""
+        divides by (paper Fig. 4). Derived in docs/decisions.md D19, and matched by the Fig. 3 runs (D20).
+        (Used in fig 4 not in fig 3)"""
         return (self.step / 4) ** 0.5
 
     def _direction(self, rng: random.Random) -> int:

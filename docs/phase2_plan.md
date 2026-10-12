@@ -29,7 +29,6 @@ short. Rough timing: steps 1–2 by Christmas, steps 3–4 by the end of Februar
 - How to turn simulation steps into real time (the algorithm sold 9% of the last minute's volume).
 - How the intermediaries should decide when to trade. Paddrik et al.'s position-limit rule is one
   option.
-- Whether this is the right amount of work for the year.
 
 ## Not planned
 

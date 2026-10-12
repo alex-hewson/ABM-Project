@@ -1,10 +1,11 @@
 # HFT/Order-Book ABM — Project Plan
 
-What is done and what comes next. The reasoning and evidence behind each choice are in
-`decisions.md` (cited below by number, e.g. D11).
+What is done and what comes next. The choices made are in `decisions.md` (cited below by number,
+e.g. D11), the evidence for them in `validation.md`, and what the paper itself defines in
+`paper_model.md`.
 
-Paper: Preis et al. (2006), EPL 75, 510 (`SimpleOrderBookModelPaper.pdf`, kept outside the
-repository in OneDrive `Work/ABM/Papers/`).
+Paper: Preis, Golke, Paul & Schneider (2006), "Multi-agent-based Order Book Model of financial
+markets", EPL 75, 510.
 
 ## Where things stand
 
@@ -22,16 +23,15 @@ repository in OneDrive `Work/ABM/Papers/`).
   `experiments/plot.py fig2|fig3`) (D20)
 - **Fig. 3 reproduced qualitatively at paper scale**: `results/fig3_bounded.pkl`,
   `results/fig3_mean_reverting.pkl`, `results/fig3_final.png`, 10⁶ steps, 50 runs per N_A,
-  commit a65a28c (`decisions.md`, section 4)
+  commit a65a28c (`validation.md`, section 4)
 - Volatility-coupled entry depth (Eq. 4), runner option `--depth-coupling` and `plot.py fig4` (D21, D22)
 - **Fig. 4 reproduced at paper scale**: `results/fig4.pkl` / `.png`, 10⁶ steps, 50 runs per N_A,
-  commit acd8ebe; fat exponential tails whose widths match the paper's Fig. 4b (`decisions.md`,
-  section 4)
+  commit acd8ebe; fat exponential tails whose widths match the paper's Fig. 4b (`validation.md`,
+  section 5)
 
 Code layout and how to run things: see `README.md`.
 
-**Git:** `main` holds Figs. 2 and 3; Fig. 4 is on branch `fig4-entry-depth`. The project folder is the repository root, so a clone gives the
-project directly, with one README.
+**Git:** `main` holds all of Phase 1. The finished baseline is tagged `baseline-v1` (D23).
 
 ## Open questions
 Each is described in `decisions.md`:
@@ -66,8 +66,9 @@ This is the methodological foundation — everything built later is compared aga
    - Result: H(Δτ) the same shape as Fig. 3c with a slightly higher peak (as in the paper), and fat
      exponential tails in P(Δp) (kurtosis 6.9–9.4, against 2.75–2.95 without Eq. 4)
 5. **Checkpoint / write-up**
-   - Document the reproduction as validation in the methodology chapter
-   - Freeze and tag this version (git tag `baseline-v1`) as the control model for later comparison
+   - ~~Freeze and tag this version (git tag `baseline-v1`) as the control model for later comparison~~
+     (done; D23)
+   - Still to do: document the reproduction as validation in the methodology chapter
 
 ---
 
@@ -82,7 +83,5 @@ Phase 2–5 outline in this file is replaced by that plan.
 
 ## Immediate next steps
 
-1. Commit the Fig. 4 results and the Phase 2 plan, merge `fig4-entry-depth` into `main`, and tag
-   `baseline-v1`.
-2. Discuss `phase2_plan.md` at the first supervisor meeting.
-3. Phase 2, step 1: decide the crash definition, then add the large seller.
+1. Discuss `phase2_plan.md` at the first supervisor meeting.
+2. Phase 2, step 1: decide the crash definition, then add the large seller.

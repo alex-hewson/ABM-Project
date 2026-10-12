@@ -52,7 +52,7 @@ class LiquidityProvider:
         r = rng or random
         if r.random() >= self.alpha:
             return None
-        return self.submit(book, timestamp, fallback_price, r, lambda_)
+        return self.submit(book, timestamp, fallback_price, rng, lambda_)
 
     def submit(
             self, book: OrderBook, timestamp: int, fallback_price: int, rng: Optional[random.Random] = None,
@@ -104,7 +104,7 @@ class LiquidityTaker:
 
         if r.random() >= self.mu:
             return None
-        return self.submit(book, timestamp, r, q_taker)
+        return self.submit(book, timestamp, rng, q_taker)
 
     def submit(
             self, book: OrderBook, timestamp: int, rng: Optional[random.Random] = None,

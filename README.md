@@ -15,7 +15,9 @@ sell order turns into a crash, and what stops it.
   See [docs/phase2_plan.md](docs/phase2_plan.md).
 
 Status and next steps are in [docs/project_plan.md](docs/project_plan.md). The reasoning behind
-each modelling and measurement choice is in [docs/decisions.md](docs/decisions.md).
+each modelling and measurement choice is in [docs/decisions.md](docs/decisions.md). What the paper
+itself defines is summarised in [docs/paper_model.md](docs/paper_model.md), and the checks and
+comparison with the paper are in [docs/validation.md](docs/validation.md).
 
 ## Results
 
@@ -49,7 +51,7 @@ lines). The tail widths match the paper's Fig. 4b to within reading error: for e
 | `analysis/` | Measurements on one simulation's output: `prices.py` (price series), `hurst.py` (Hurst exponent), `returns.py` (return distributions), `depth_profile.py` (depth profile + lognormal fit) |
 | `experiments/` | Reproducing the paper's figures: `run.py` (runs many simulations and saves the results), `plot.py` (draws Fig. 2, 3 or 4 from saved results); `checkpoint.py` and `provenance.py` are support code these two use, not called directly |
 | `tests/` | One test file per file above |
-| `docs/` | `project_plan.md` (status and next steps), `decisions.md` (assumptions and choices to note in the thesis), `phase2_plan.md` (draft plan for the flash-crash work), `figures/` (the final plots shown above) |
+| `docs/` | `project_plan.md` (status and next steps), `paper_model.md` (the model as the paper defines it), `decisions.md` (assumptions and choices made where the paper is unclear, to note in the thesis), `validation.md` (the tests and numbers behind them, and the comparison with the paper), `phase2_plan.md` (draft plan for the flash-crash work), `figures/` (the final plots shown above) |
 | `results/` | Generated data and plots (not tracked by git) |
 
 ## Pipeline of results
