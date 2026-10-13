@@ -158,6 +158,38 @@ def test_bins_reach_far_enough_and_overflow_is_counted():
     check("and nothing overflows in a normal run", all(n == 0 for v in r["return_overflow"].values() for n in v.values()))
 
 
+def test_value_trader_settings_are_recorded_in_the_config():
+    check("no value traders: recorded as None, as in files made before they existed",
+          make_config(1000, {})["value_traders"] is None)
+    check("with value traders: their share, window and spread are recorded",
+          make_config(1000, {}, value=(0.2, 500, 30.0))["value_traders"] == {"fraction": 0.2, "window": 500, "spread": 30.0})
+
+
+def same_run(a, b):
+    return all(np.array_equal(a["rms"][name], b["rms"][name]) for name in PRICE_DEFINITIONS) and a["n_trades"] == b["n_trades"]
+
+
+def test_run_one_with_value_traders():
+    plain = run_one((125, 0, 3_000, "symmetric", 0.0))
+    spelled_out = run_one((125, 0, 3_000, "symmetric", 0.0, (0.0, 777, 5.0)))
+    with_traders = run_one((125, 0, 3_000, "symmetric", 0.0, (0.4, 500, 30.0)))
+    check("a job without the value trader settings means none of them", same_run(plain, spelled_out))
+    check("with 40% value traders the run is a different one", not same_run(plain, with_traders))
+    check("and no market order went unfilled", with_traders["n_match_failures"] == 0)
+
+
+def test_autocorrelations_are_stored_for_every_price_definition():
+    r = run_one((125, 0, 3_000, "symmetric", 0.0))
+    check("one entry per price definition", set(r["autocorr"]) == set(PRICE_DEFINITIONS))
+    # 3,000 steps = 60 intervals of 50 steps; lags go up to a quarter of that
+    check("signed and absolute, 15 lags each for a 3,000-step run",
+          all(len(v["signed"]) == 15 and len(v["absolute"]) == 15 for v in r["autocorr"].values()))
+    check("every value is a correlation, between -1 and 1",
+          all(np.all(np.abs(v[kind]) <= 1) for v in r["autocorr"].values() for kind in ("signed", "absolute")))
+    tiny = run_one((125, 0, 150, "symmetric", 0.0))
+    check("a run too short for even one lag stores none, without failing", tiny["autocorr"] == {})
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

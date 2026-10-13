@@ -121,6 +121,13 @@ choices put the peak 25–50% too far out. **[Open]** whether the paper fits eac
 The mid-price moves in half ticks and a trade price in whole ticks. Bins that do not match the grid
 give a zigzag. **[Open]** the paper's axis convention for Fig. 2d.
 
+**D29. Autocorrelation of price changes. [Assumed, Checked]**
+Measured on the price change over blocks of 50 steps that do not overlap, at lags of 1 to 100
+blocks. Two versions: of the changes themselves (0 in real markets; below 0 means the price tends
+to turn back), and of their absolute size (above 0 means volatility clustering). The block of 50
+steps is a choice: long enough that single-step noise does not dominate, short enough to leave
+many blocks per run. Checked on made-up series with known answers.
+
 **D22. Return bins reach 50,000 ticks, and anything beyond is counted. [Assumed, Checked]**
 The tails in Fig. 4b reach several thousand ticks. Nothing has fallen beyond the bins so far.
 Fig. 4b is drawn as in the paper: signed Δp on a linear axis, probability on a log axis.
@@ -201,8 +208,8 @@ value traders the model is exactly the baseline (D23).
   blocked reflection matters.
 - **Value trader settings (D28).** How many there are, the window W and the size of the shifts are
   not fitted to anything yet. They are to be set from real order book data.
-- **Side effect of value traders.** They tie the price to its own recent average, so it wanders
-  less in normal times. The effect on the Hurst exponent and the return distributions has not
-  been measured.
+- **Side effect of value traders.** At the default settings they hold the price too close to its
+  recent average: H falls far below 0.5 and the trend of Figs. 3–4 disappears (`validation.md`,
+  section 11). Settings that give recovery without this have not been found yet.
 - **Which mixes of agent types to compare,** and whether speed and size should also be varied
   separately (e.g. unit orders every 4 steps).

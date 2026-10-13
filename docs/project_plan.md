@@ -38,6 +38,10 @@ markets", EPL 75, 510.
   (`validation.md`, section 1)
 - Value traders, which buy below their own value and sell above it (D28). With them the price
   recovers after a shock; without them it never does (`validation.md`, section 10)
+- Autocorrelation of price changes and of their size (volatility clustering) (D29), a runner option
+  for value traders, and a plot that compares results files (`plot.py compare`)
+- First look at what value traders do in normal times: at the default settings they hold the price
+  too close to its average and remove the trend of Figs. 3–4 (`validation.md`, section 11)
 
 Code layout and how to run things: see `README.md`.
 
@@ -109,8 +113,8 @@ limits) and needs rewriting.
 
 ## Immediate next steps
 
-1. Measure what value traders do to the price in normal times: Hurst exponent, return
-   distributions, and volatility clustering (not yet measured at all).
+1. Find value trader settings (number, window, size of shifts) that give recovery after a shock
+   without pinning the price in normal times: sweep them, and plot recovery time against H.
 2. Give value traders the speed and size types (D27), to see whether fast and slow value traders
    recover differently.
 3. When the E-mini data arrives: find out its form and the rules for using it, keep it out of the

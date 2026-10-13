@@ -12,6 +12,10 @@ Parameters are the paper's (alpha=0.15, mu=0.025, delta=0.025, lambda_0=100, q_p
 --depth-coupling C (with --flow mean-reverting) makes the providers' entry depth follow Eq. 4,
 lambda(t) = lambda_0 (1 + |q(t) - 1/2| / sqrt(<(q - 1/2)^2>) * C), for Fig. 4 (paper: C = 10).
 
+--value-fraction F turns that share of the takers into value traders (abm/agents.py, ValueTrader;
+docs/decisions.md, D28), e.g. 0.2 gives 25, 50 and 100 of them for N_A = 125, 250 and 500.
+--value-window and --value-spread set their reference window and how far apart their values are.
+
 Each flow is a separate experiment with its own results file. Every run stores:
     - RMS price change at ~80 lags from 1 to n_steps/10, for all five price definitions in
       analysis/prices.py (H(delta tau) is derived from these at plot time; see analysis/hurst.py)
@@ -19,6 +23,8 @@ Each flow is a separate experiment with its own results file. Every run stores:
       plus a count of any increments too large for the last bin (none expected; checked when plotting)
     - order book depth around the midpoint over the last 10^4 steps (N_A = 500 only)
     - the mid-price path (N_A = 250, seed 0 only)
+    - the autocorrelation of price changes over 50-step intervals, signed and absolute, at lags of
+      1 to 100 intervals (analysis/autocorr.py), for all five price definitions
     - with a random-walk flow: summary statistics of q_taker, including <(q - 1/2)^2> (Eq. 4)
     - with depth coupling: the mean and largest entry depth lambda(t)
 
@@ -32,6 +38,7 @@ Usage (paper scale is the default: 10^6 steps, 50 runs per N_A; expect hours per
     python -m experiments.run --flow bounded --out results/fig3_bounded.pkl
     python -m experiments.run --flow mean-reverting --out results/fig3_mean_reverting.pkl
     python -m experiments.run --flow mean-reverting --depth-coupling 10 --out results/fig4.pkl
+    python -m experiments.run --value-fraction 0.2 --out results/value20.pkl     # 20% value traders
     ... add --resume to continue after an interruption
 """
 
@@ -50,6 +57,7 @@ import numpy as np
 
 from abm.buy_probability import BoundedRandomWalk, MeanRevertingWalk
 from abm.simulation import run_simulation
+from analysis.autocorr import change_autocorrelations
 from analysis.hurst import log_spaced_taus, rms_at_lags
 from analysis.prices import PRICE_DEFINITIONS, price_series
 from analysis.returns import return_counts
@@ -65,6 +73,8 @@ DEPTH_AGENTS = 500           # depth profile and return distributions are plotte
 DEPTH_WINDOW = 10_000        # depth profile: averaged over this many final steps
 RETURN_TAUS = (200, 400, 800, 1600)
 LAG_POINTS = 80              # number of log-spaced lags (from 1 to n_steps/10) at which RMS is stored
+AUTOCORR_INTERVAL = 50       # autocorrelations are of price changes over this many steps ...
+AUTOCORR_MAX_LAG = 100       # ... at lags of 1 to this many intervals (so up to 5,000 steps apart)
 
 # Order-flow processes for the takers' buy probability (decisions D16-D19). "symmetric" means no
 # process: every taker keeps q_taker = 1/2, exactly the Fig. 2 model.
@@ -103,6 +113,14 @@ def describe_entry_depth(flow_name: str, depth_coupling: float) -> Optional[dict
     return {"c_lambda": depth_coupling, "lambda_0": PARAMS["lambda_"], "q_rms": flow.stationary_rms}
 
 
+def describe_value_traders(fraction: float, window: int, spread: float) -> Optional[dict]:
+    """The value trader settings, as saved in the results file (None when there are none, which
+    keeps those files identical in format to ones made before value traders were added)."""
+    if fraction == 0:
+        return None
+    return {"fraction": fraction, "window": window, "spread": spread}
+
+
 def make_bin_edges(grid_step: float, min_ticks: float = 1.0, max_ticks: float = 50_000.0,
                    n_points: int = 52) -> np.ndarray:
     """Log-spaced |increment| bin edges for a price series that only takes multiples of
@@ -131,8 +149,11 @@ RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
 
 def run_one(job):
     """One independent simulation, reduced to the quantities the figures need.
-    job = (n_agents, seed, n_steps, flow name, depth coupling C_lambda)."""
-    n_agents, seed, n_steps, flow_name, depth_coupling = job
+    job = (n_agents, seed, n_steps, flow name, depth coupling C_lambda, value traders).
+    value traders = (share of the takers, reference window, mean shift). It can be left off the
+    job, which means none."""
+    n_agents, seed, n_steps, flow_name, depth_coupling, *rest = job
+    value_fraction, value_window, value_spread = rest[0] if rest else (0.0, 1000, 50.0)
     flow = make_flow(flow_name)                 # fresh for this run
     q_rms = flow.stationary_rms if depth_coupling > 0 else None      # Eq. 4's sqrt(<(q - 1/2)^2>)
     record_depth = n_agents == DEPTH_AGENTS
@@ -144,11 +165,15 @@ def run_one(job):
         taker_flow=flow,
         depth_coupling=depth_coupling,
         q_rms=q_rms,
+        n_value_traders=round(value_fraction * n_agents),
+        value_window=value_window,
+        value_spread=value_spread,
         **PARAMS,
     )
 
     taus = np.array(log_spaced_taus(1, n_steps // 10, LAG_POINTS))
-    rms, counts, overflow, mid_path = {}, {}, {}, None
+    rms, counts, overflow, autocorr, mid_path = {}, {}, {}, {}, None
+    autocorr_lags = min(AUTOCORR_MAX_LAG, n_steps // AUTOCORR_INTERVAL // 4)    # short trial runs: fewer lags
     for name in PRICE_DEFINITIONS:
         try:
             prices = price_series(result, name)
@@ -161,6 +186,8 @@ def run_one(job):
         # none are being lost.
         overflow[name] = {tau: int(np.sum(np.abs(prices[tau:] - prices[:-tau]) >= RETURN_BIN_EDGES[name][-1]))
                           for tau in RETURN_TAUS if tau < n_steps}
+        if autocorr_lags >= 1:
+            autocorr[name] = change_autocorrelations(prices, AUTOCORR_INTERVAL, autocorr_lags)
         if name == "mid":
             mid_path = prices
 
@@ -181,6 +208,7 @@ def run_one(job):
         "rms": rms,                    # {price definition: RMS price change at each lag in taus}
         "return_counts": counts,       # {price definition: {delta tau: histogram counts of |increment|}}
         "return_overflow": overflow,   # {price definition: {delta tau: increments past the last bin}}
+        "autocorr": autocorr,          # {price definition: {"signed": ..., "absolute": ...}} over lags 1, 2, ...
         "depth_sum": result.depth_profile_sum,
         "n_depth_snapshots": result.n_depth_snapshots,
         "mean_orders": float(np.mean(result.total_orders_series)),
@@ -194,15 +222,19 @@ def run_one(job):
 
 # Settings that must match for saved runs to be combined with new ones.
 CHECKED_SETTINGS = ("format", "n_steps", "params", "return_bin_edges", "depth_window",
-                    "price_definitions", "lag_points", "flow", "entry_depth")
+                    "price_definitions", "lag_points", "flow", "entry_depth", "value_traders")
 
 
-def make_config(n_steps: int, git: dict, flow_name: str = "symmetric", depth_coupling: float = 0.0) -> dict:
-    """The settings that define an experiment; saved with the results and checked on --resume."""
+def make_config(n_steps: int, git: dict, flow_name: str = "symmetric", depth_coupling: float = 0.0,
+                value: tuple = (0.0, 1000, 50.0)) -> dict:
+    """The settings that define an experiment; saved with the results and checked on --resume.
+    value = (share of the takers that are value traders, reference window, mean shift)."""
     return {"format": RESULTS_FORMAT, "n_steps": n_steps, "params": PARAMS,
             "return_bin_edges": RETURN_BIN_EDGES, "depth_window": DEPTH_WINDOW,
             "price_definitions": PRICE_DEFINITIONS, "lag_points": LAG_POINTS,
             "flow": describe_flow(flow_name), "entry_depth": describe_entry_depth(flow_name, depth_coupling),
+            "value_traders": describe_value_traders(*value),
+            "autocorr": {"interval": AUTOCORR_INTERVAL, "max_lag": AUTOCORR_MAX_LAG},
             "git": git}
 
 
@@ -212,6 +244,12 @@ def main(argv=None):
                         help="how the takers' buy probability behaves (default: symmetric, Fig. 2)")
     parser.add_argument("--depth-coupling", type=float, default=0.0,
                         help="C_lambda in Eq. 4 (Fig. 4: 10); needs --flow mean-reverting. Default 0: fixed depth")
+    parser.add_argument("--value-fraction", type=float, default=0.0,
+                        help="share of the takers that are value traders, 0 to 1 (default 0: none)")
+    parser.add_argument("--value-window", type=int, default=1000,
+                        help="steps of past mid-prices in the value traders' reference price (default 1000)")
+    parser.add_argument("--value-spread", type=float, default=50.0,
+                        help="mean distance of a value trader's own value from the reference, in ticks (default 50)")
     parser.add_argument("--n-steps", type=int, default=1_000_000)
     parser.add_argument("--n-runs", type=int, default=50, help="runs per N_A")
     parser.add_argument("--workers", type=int, default=os.cpu_count())
@@ -227,13 +265,17 @@ def main(argv=None):
     if args.depth_coupling > 0 and args.flow != "mean-reverting":
         raise SystemExit("--depth-coupling needs --flow mean-reverting: Eq. 4 is defined for the paper's "
                          "mean-reverting walk, and its sqrt(<(q - 1/2)^2>) is derived for that walk (D19)")
+    if not (0 <= args.value_fraction <= 1):
+        raise SystemExit("--value-fraction must be between 0 and 1")
+    value = (args.value_fraction, args.value_window, args.value_spread)
     if args.out is None:
         suffix = f"_c{args.depth_coupling:g}" if args.depth_coupling > 0 else ""
+        suffix += f"_v{args.value_fraction:g}" if args.value_fraction > 0 else ""
         args.out = RESULTS_DIR / f"{args.flow}{suffix}.pkl"
 
     # Captured before the runs start, so it describes the code the workers actually load.
     git = git_info()
-    config = make_config(args.n_steps, git, args.flow, args.depth_coupling)
+    config = make_config(args.n_steps, git, args.flow, args.depth_coupling, value)
 
     parts_dir = parts_dir_for(args.out)
     if has_parts(parts_dir) and not args.resume:
@@ -283,6 +325,10 @@ def main(argv=None):
     print("entry depth: fixed at lambda_0" if depth is None else
           f"entry depth: Eq. 4, lambda(t) = {depth['lambda_0']:g} (1 + |q - 1/2| / {depth['q_rms']:.4f} "
           f"* {depth['c_lambda']:g})")
+    traders = config["value_traders"]
+    print("value traders: none" if traders is None else
+          f"value traders: {traders['fraction']:.0%} of the takers (window {traders['window']}, "
+          f"mean shift {traders['spread']:g} ticks)")
     print(f"{len(all_keys)} runs ({args.n_runs} per N_A in {AGENT_COUNTS}), {args.n_steps:,} steps each, "
           f"{args.workers} workers")
     print(f"code version: {describe(config['git'])}")
@@ -296,7 +342,7 @@ def main(argv=None):
     start = time.perf_counter()
     if todo:
         with ProcessPoolExecutor(max_workers=args.workers) as pool:
-            futures = [pool.submit(run_one, (n, seed, args.n_steps, args.flow, args.depth_coupling))
+            futures = [pool.submit(run_one, (n, seed, args.n_steps, args.flow, args.depth_coupling, value))
                        for n, seed in todo]
             try:
                 for count, future in enumerate(as_completed(futures), n_already + 1):

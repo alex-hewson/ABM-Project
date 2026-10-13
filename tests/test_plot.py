@@ -84,6 +84,31 @@ def test_all_figures_are_drawn_and_mismatched_files_refused():
         check("fig2 from a bounded-walk file is refused", error is not None and "flow" in error)
 
 
+def test_compare_puts_files_side_by_side():
+    with tempfile.TemporaryDirectory() as tmp:
+        plain = make_results(tmp, "symmetric")
+        traders = Path(tmp) / "value.pkl"
+        _, error = quietly(run.main, ["--value-fraction", "0.4", "--n-steps", str(STEPS), "--n-runs", "1",
+                                      "--workers", "3", "--out", str(traders)])
+        check("an experiment with value traders runs", error is None and traders.exists())
+
+        png = Path(tmp) / "compare.png"
+        text, error = quietly(plot.main, ["compare", "--data", str(plain), str(traders),
+                                          "--labels", "none", "forty percent", "--out", str(png)])
+        check("the comparison is drawn", error is None and png.exists())
+        check("the table has a row for each file, under the labels given",
+              "none " in text and "forty percent" in text and "H(100)" in text and "kurt." in text)
+
+        text, error = quietly(plot.main, ["compare", "--data", str(plain), str(traders),
+                                          "--out", str(Path(tmp) / "auto.png")])
+        check("without labels, each file is described by its settings",
+              error is None and "symmetric, no value traders" in text and "symmetric, 40% value traders" in text)
+
+        _, error = quietly(plot.main, ["compare", "--data", str(plain), str(traders), "--labels", "only one",
+                                       "--out", str(Path(tmp) / "bad.png")])
+        check("the wrong number of labels is refused", error is not None and "labels" in error)
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

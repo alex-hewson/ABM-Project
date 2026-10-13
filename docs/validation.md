@@ -273,3 +273,51 @@ Checked in `tests/test_simulation.py`: 30 steps after a 300-unit sell, the price
 ticks on average with 125 value traders (mean shift 10) and by 6 ticks without (20 runs each; the 6
 is noise). The fast and per-agent methods agree with value traders present (volume 1238 vs 1243,
 spread 18.1 vs 18.5).
+
+## 11. What value traders do to the price in normal times (first look)
+
+No shock. A share of the takers are value traders (D28, with the default window of 1,000 steps and
+mean shift of 50 ticks). 10⁵ steps, 8 runs per N_A, values for N_A = 500 with the median trade price
+(`results/side_basic.png`, `side_fig4.png`, made with `plot.py compare`; commit 0282299 plus the
+runner options). This is a first look, not a paper-scale run: the lags only reach 10⁴ steps.
+
+RMS and kurtosis are of the price change over 800 steps. The two autocorrelations (D29) are at a
+lag of one 50-step block.
+
+**Basic model (Fig. 2 settings)**
+
+| Value traders | H(10) | H(100) | H(10³) | H(10⁴) | RMS | Kurtosis | Autocorr. of changes | Autocorr. of their size |
+|---|---|---|---|---|---|---|---|---|
+| none | 0.08 | 0.20 | 0.38 | 0.50 | 30.6 | 2.96 | −0.38 | 0.08 |
+| 10% | 0.08 | 0.14 | 0.28 | 0.72 | 21.9 | 3.04 | −0.41 | 0.12 |
+| 20% | 0.07 | 0.09 | 0.26 | 0.75 | 17.1 | 2.95 | −0.44 | 0.14 |
+| 50% | 0.06 | 0.03 | 0.13 | 0.62 | 12.5 | 2.85 | −0.46 | 0.16 |
+
+**Full model (Fig. 4 settings: mean-reverting walk and Eq. 4)**
+
+| Value traders | H(10) | H(100) | H(10³) | H(10⁴) | RMS | Kurtosis | Autocorr. of changes | Autocorr. of their size |
+|---|---|---|---|---|---|---|---|---|
+| none | 0.09 | 0.38 | 0.68 | 0.53 | 676.5 | 16.55 | −0.27 | 0.36 |
+| 20% | 0.02 | 0.01 | 0.05 | 0.37 | 87.1 | 5.11 | −0.50 | 0.40 |
+| 50% | 0.01 | 0.00 | 0.01 | 0.30 | 48.4 | 4.46 | −0.49 | 0.36 |
+
+- **Value traders hold the price close to its own recent average.** H falls well below 0.5 for lags
+  up to about the window length (1,000 steps), and the price moves less: the RMS change over 800
+  steps falls from 30.6 to 12.5 ticks in the basic model.
+- **In the full model they remove the trend.** With 20% value traders the peak in H near 10³ (0.68)
+  is gone (0.05), and the price moves about 8 times less. The paper's Fig. 3 and Fig. 4 behaviour
+  does not survive at these settings.
+- **Fat tails get weaker but do not vanish** in the full model (kurtosis 16.6, then 5.1 and 4.5,
+  against 3 for a Gaussian). In the basic model the distribution stays Gaussian.
+- **Volatility clustering is unchanged in the full model:** the size of price changes stays
+  correlated for about 700 steps, with or without value traders. It comes from Eq. 4, where the entry
+  depth follows the trend. The basic model has almost none (0.08 at the first lag only).
+- **At lags past the window, H in the basic model rises above 0.5** (0.62–0.75 at 10⁴). The price
+  is free again there and its spread has to catch up. Runs of 10⁵ steps cannot show whether H then
+  returns to 0.5; that needs longer runs.
+
+**What this means.** At these settings the value traders are too strong for normal times. Real
+prices have H close to 0.5 and no autocorrelation in their changes. So there is a trade-off: value
+traders are needed for the price to recover after a shock (section 10), but too many, or with too
+long a memory, pin the price down. The number of value traders, the window and the size of the
+shifts have to be set so that both hold, and real data should fix them.

@@ -48,8 +48,8 @@ lines). The tail widths match the paper's Fig. 4b to within reading error: for e
 | Folder | Contents |
 |---|---|
 | `abm/` | The model: `orderbook.py` (matching engine), `agents.py` (liquidity providers / takers, agent types with different speeds and order sizes, and value traders, which react to the price), `buy_probability.py` (how the takers' buy probability changes over time, Figs. 3 and 4), `simulation.py` (step loop, runs agents through orderbook) |
-| `analysis/` | Measurements on one simulation's output: `prices.py` (price series), `hurst.py` (Hurst exponent), `returns.py` (return distributions), `depth_profile.py` (depth profile + lognormal fit), `recovery.py` (how far a shock moves the book and how much is undone) |
-| `experiments/` | Reproducing the paper's figures: `run.py` (runs many simulations and saves the results), `plot.py` (draws Fig. 2, 3 or 4 from saved results); `checkpoint.py` and `provenance.py` are support code these two use, not called directly. `shock.py` is the shock test: one large market order, then the book is watched as it refills |
+| `analysis/` | Measurements on one simulation's output: `prices.py` (price series), `hurst.py` (Hurst exponent), `returns.py` (return distributions), `depth_profile.py` (depth profile + lognormal fit), `recovery.py` (how far a shock moves the book and how much is undone), `autocorr.py` (autocorrelation of price changes and of their size, i.e. volatility clustering) |
+| `experiments/` | Reproducing the paper's figures: `run.py` (runs many simulations and saves the results), `plot.py` (draws Fig. 2, 3 or 4 from saved results, or compares several results files); `checkpoint.py` and `provenance.py` are support code these two use, not called directly. `shock.py` is the shock test: one large market order, then the book is watched as it refills |
 | `tests/` | One test file per file above |
 | `docs/` | `project_plan.md` (status and next steps), `paper_model.md` (the model as the paper defines it), `decisions.md` (assumptions and choices made where the paper is unclear, to note in the thesis), `validation.md` (the tests and numbers behind them, and the comparison with the paper), `phase2_plan.md` (draft plan for the flash-crash work), `figures/` (the final plots shown above) |
 | `results/` | Generated data and plots (not tracked by git) |
@@ -66,6 +66,7 @@ analysis/*.py             turns a SimulationResult into numbers
   returns.py                 return-distribution histograms
   depth_profile.py           depth profile + its lognormal fit
   recovery.py                response to a shock: impact, share recovered, recovery time
+  autocorr.py                autocorrelation of price changes, and of their size
         |
         v
 experiments/run.py        runs MANY simulations (parallel, resumable),
@@ -141,6 +142,22 @@ refuses if the settings, the flow, the entry depth or the code version differ fr
 (`--allow-code-change` overrides the code check when the change is known not to affect the
 simulation). If a run fails or the experiment is stopped with Ctrl+C, the runs still queued are
 cancelled at once rather than run to completion.
+
+### Comparing versions of the model
+
+`--value-fraction` turns a share of the takers into value traders (see the shock test below). To see
+what that does to the price in normal times, run the same experiment with and without them, then
+put the results side by side:
+
+```
+python -m experiments.run --n-steps 100000 --n-runs 8 --out results/plain.pkl
+python -m experiments.run --n-steps 100000 --n-runs 8 --value-fraction 0.2 --out results/value20.pkl
+python -m experiments.plot compare --data results/plain.pkl results/value20.pkl --labels "none" "20%" --out results/compare.png
+```
+
+The comparison shows the Hurst exponent, one return distribution, and the autocorrelation of price
+changes and of their size (volatility clustering), all for N_A = 500, and prints a table of the
+main numbers. It works for any results files, e.g. with `--flow` or `--depth-coupling` as well.
 
 ### Shock test
 

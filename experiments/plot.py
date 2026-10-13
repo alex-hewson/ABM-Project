@@ -6,6 +6,8 @@ Draw the paper's figures from results files saved by experiments/run.py.
                                     --mean-reverting results/fig3_mean_reverting.pkl --out results/fig3.png
     python -m experiments.plot fig4 --data results/fig4.pkl --out results/fig4.png \
                                     [--compare results/fig3_mean_reverting.pkl]
+    python -m experiments.plot compare --data results/a.pkl results/b.pkl --labels "none" "20%" \
+                                       --out results/compare.png
 
 All take --price mid|last|first|median|mean for the Hurst and return-distribution panels
 (default: median, the definition adopted for reported results; docs/decisions.md, D11).
@@ -21,8 +23,15 @@ fig4   (a) H(delta tau) and (b) signed increment distributions on a semi-log plo
        exponential tails are straight lines. --compare adds the same run without Eq. 4 (the Fig. 3c/3d
        file) to panel (b) as dashed lines, to show that the fat tails come from Eq. 4.
 
-Each command checks that the files it is given were made with the flow (and entry depth) it
-expects, so e.g. a bounded-walk file can't be plotted as the mean-reverting one by mistake.
+compare  puts any number of results files side by side, one curve per file, all at N_A = 500:
+       (a) H(delta tau), (b) the |increment| distribution for one delta tau (--tau), (c) the
+       autocorrelation of price changes, (d) the autocorrelation of their absolute size (volatility
+       clustering). It also prints a table of the main numbers. Meant for seeing what a change to
+       the model does, e.g. adding value traders. Files made before the autocorrelations were
+       stored are left out of (c) and (d).
+
+fig2, fig3 and fig4 check that the files they are given were made with the flow (and entry depth)
+they expect, so e.g. a bounded-walk file can't be plotted as the mean-reverting one by mistake.
 """
 
 from __future__ import annotations
@@ -337,6 +346,125 @@ def figure4(args):
     print(f"saved {args.out}")
 
 
+def load_any(path: Path) -> dict:
+    """Load a results file made with any flow, entry depth or agents (only the format is checked)."""
+    with open(path, "rb") as f:
+        data = pickle.load(f)
+    if data["config"].get("format") != RESULTS_FORMAT:
+        raise SystemExit(f"{path} was made by an older version of the runner (results format "
+                         f"{data['config'].get('format')}, this plotter needs {RESULTS_FORMAT}).")
+    return data
+
+
+def describe_settings(config: dict) -> str:
+    """Short text saying which model a results file is, e.g. 'mean-reverting + Eq. 4, 20% value traders'."""
+    text = (config.get("flow") or {}).get("name", "symmetric")
+    if config.get("entry_depth") is not None:
+        text += " + Eq. 4"
+    traders = config.get("value_traders")
+    text += ", no value traders" if traders is None else f", {traders['fraction']:.0%} value traders"
+    return text
+
+
+def mean_autocorrelation(runs, n_agents, price, kind):
+    """Mean over runs of the stored autocorrelation ("signed" or "absolute") at one N_A, or None if
+    the file has none (it was made before they were stored)."""
+    rows = [r["autocorr"][price][kind] for r in runs
+            if r["n_agents"] == n_agents and price in (r.get("autocorr") or {})]
+    return np.nanmean(rows, axis=0) if rows else None
+
+
+def hurst_near(taus, h_mean, target):
+    """H at the stored lag closest to target (None if the lags do not reach that far)."""
+    if target > taus[-1] * 1.5:
+        return None
+    return float(h_mean[int(np.argmin(np.abs(np.log(taus) - np.log(target))))])
+
+
+def figure_compare(args):
+    datasets = [load_any(path) for path in args.data]
+    labels = args.labels or [describe_settings(d["config"]) for d in datasets]
+    if len(labels) != len(datasets):
+        raise SystemExit(f"--labels: {len(labels)} labels were given for {len(datasets)} files")
+    n_agents, price, tau = DEPTH_AGENTS, args.price, args.tau
+
+    fig, axes = plt.subplots(2, 2, figsize=(13, 9))
+    (ax_h, ax_r), (ax_signed, ax_abs) = axes
+    rows = []
+    for colour, (data, label) in enumerate(zip(datasets, labels)):
+        runs, config, c = data["runs"], data["config"], f"C{colour}"
+        row = {"label": label}
+
+        taus, h = hurst_curves(runs, n_agents, price)
+        if h is None:
+            raise SystemExit(f"{label}: the file has no runs at N_A = {n_agents}")
+        h_mean = h.mean(axis=0)
+        ax_h.plot(taus, h_mean, color=c, label=label)
+        row["hurst"] = [hurst_near(taus, h_mean, target) for target in (10, 100, 1000, 10_000)]
+
+        edges = config["return_bin_edges"][price]
+        counts = sum(r["return_counts"][price][tau] for r in runs
+                     if r["n_agents"] == n_agents and tau in r["return_counts"][price])
+        if np.isscalar(counts) or counts.sum() == 0:
+            raise SystemExit(f"{label}: no return distribution stored for delta tau = {tau}")
+        density = counts_to_density(counts, edges)
+        centres = np.sqrt(edges[:-1] * edges[1:])
+        keep = density > 0
+        row["kurtosis"] = approximate_kurtosis(runs, edges, price, tau)
+        p = counts / counts.sum()
+        row["rms"] = float(np.sqrt((p * centres ** 2).sum()))
+        ax_r.plot(centres[keep], density[keep], "o-", ms=3, lw=0.8, color=c,
+                  label=f"{label} (kurtosis {row['kurtosis']:.2f})")
+        warn_about_overflow(runs, price, label)
+
+        interval = (config.get("autocorr") or {}).get("interval")
+        for ax, kind in ((ax_signed, "signed"), (ax_abs, "absolute")):
+            values = mean_autocorrelation(runs, n_agents, price, kind)
+            row[kind] = None if values is None else float(values[0])
+            if values is not None:
+                ax.plot(np.arange(1, len(values) + 1) * interval, values, color=c, lw=0.9, label=label)
+        row["book"] = float(np.mean([r["mean_orders"] for r in runs if r["n_agents"] == n_agents]))
+        rows.append(row)
+
+    ax_h.axhline(0.5, color="k", ls="--", lw=0.8)
+    ax_h.set(xscale="log", xlim=(1, None), ylim=(0, None), xlabel="$\\Delta\\tau$ [MCS]", ylabel="H($\\Delta\\tau$)",
+             title=f"(a) Hurst exponent, N$_A$={n_agents}, price = {price}")
+    ax_r.set(xscale="log", yscale="log", xlabel="|$\\Delta$p| [ticks]", ylabel="P(|$\\Delta$p|)",
+             title=f"(b) |$\\Delta$p| for $\\Delta\\tau$ = {tau}")
+    ax_signed.set(xscale="log", xlabel="lag [MCS]", ylabel="autocorrelation",
+                  title="(c) price changes: below 0 = turns back, above 0 = trends")
+    ax_abs.set(xscale="log", xlabel="lag [MCS]", ylabel="autocorrelation",
+               title="(d) size of price changes: above 0 = volatility clustering")
+    for ax in (ax_signed, ax_abs):
+        ax.axhline(0, color="k", ls="--", lw=0.8)
+    for ax in axes.flat:
+        if ax.get_legend_handles_labels()[0]:
+            ax.legend(fontsize=7)
+
+    def cell(value, fmt):
+        return f"{'-':>7}" if value is None else f"{value:>7{fmt}}"
+    width = max(len(row["label"]) for row in rows)
+    print(f"\nN_A = {n_agents}, price = {price}")
+    print(f"{'':{width}} | {'H(10)':>7} {'H(100)':>7} {'H(1e3)':>7} {'H(1e4)':>7} | {'RMS':>7} {'kurt.':>7} | "
+          f"{'ac(1)':>7} {'|ac|(1)':>7} | {'orders':>7}")
+    for row in rows:
+        print(f"{row['label']:{width}} | " + " ".join(cell(h, ".2f") for h in row["hurst"])
+              + f" | {cell(row['rms'], '.1f')} {cell(row['kurtosis'], '.2f')} | "
+              f"{cell(row['signed'], '.3f')} {cell(row['absolute'], '.3f')} | {cell(row['book'], '.0f')}")
+    print(f"\nRMS and kurtosis are of the price change over {tau} steps (a Gaussian has kurtosis 3). ac(1) and "
+          f"|ac|(1) are the\nautocorrelations of the change over one interval and of its size, at a lag of one interval.")
+
+    steps = sorted({d["config"]["n_steps"] for d in datasets})
+    fig.suptitle("Comparison of results files: " + ", ".join(f"{s:,}" for s in steps) + " steps per run")
+    fig.tight_layout()
+    add_footer(fig, [d["config"] for d in datasets])
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(args.out, dpi=130)
+    plt.close(fig)
+    print(f"saved {args.out}")
+    return rows
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     figures = parser.add_subparsers(dest="figure", required=True)
@@ -356,11 +484,18 @@ def main(argv=None):
                       help="the same model without Eq. 4 (the Fig. 3 mean-reverting file), drawn dashed in (b)")
     fig4.add_argument("--out", type=Path, default=RESULTS_DIR / "fig4.png")
 
-    for sub in (fig2, fig3, fig4):
+    compare = figures.add_parser("compare", help="several results files side by side")
+    compare.add_argument("--data", type=Path, nargs="+", required=True, help="results files, one curve each")
+    compare.add_argument("--labels", nargs="+", default=None, help="one label per file (default: its settings)")
+    compare.add_argument("--tau", type=int, default=800, choices=RETURN_TAUS,
+                         help="delta tau for the return-distribution panel (default 800)")
+    compare.add_argument("--out", type=Path, default=RESULTS_DIR / "compare.png")
+
+    for sub in (fig2, fig3, fig4, compare):
         sub.add_argument("--price", choices=PRICE_DEFINITIONS, default="median",
                          help="price definition for the Hurst and distribution panels")
     args = parser.parse_args(argv)
-    {"fig2": figure2, "fig3": figure3, "fig4": figure4}[args.figure](args)
+    {"fig2": figure2, "fig3": figure3, "fig4": figure4, "compare": figure_compare}[args.figure](args)
 
 
 if __name__ == "__main__":
