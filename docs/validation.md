@@ -167,3 +167,33 @@ halving it double-counts, since each side only has half that mass.
 
 **Hurst curve cut short (D12).** The earlier estimator dropped the first and last lags, so its curve
 started at Δτ = 14 and ended near 7×10⁴. This hid the rise of H to the left of its minimum.
+
+## 8. Shock test on the basic model
+
+One market sell order of 50, 150 or 300 units, injected after 2,000 steps (D24). Basic model
+(Fig. 2 parameters), N_A = 250, mean of 400 runs per size, 2,000 steps recorded after the shock
+(`results/shock_test.png`, made with `experiments/shock.py`, commit e3de4d1 plus the shock code).
+Measures as in D25. Before the shock each side of the book holds 606 orders and the spread is 23.2
+ticks.
+
+| Size | Price at the shock | Price at the end | Share recovered | Spread at the shock | Spread half-life | Bids at the shock | Bids half-life | Bids 90% back |
+|---|---|---|---|---|---|---|---|---|
+| 50 | −7.9 | −6.5 | 0.20 | 39.2 | 2 steps | 557 | 28 steps | 89 steps |
+| 150 | −18.0 | −18.2 | 0.00 | 59.3 | 1 step | 457 | 27 steps | 90 steps |
+| 300 | −38.0 | −40.0 | −0.05 | 99.2 | 1 step | 307 | 28 steps | 90 steps |
+
+Prices are changes in ticks from the step before the shock. The control with no shock ends at +1.0
+ticks, so differences of 1–2 ticks are noise. That covers the 0.20 for size 50 (1.4 ticks).
+
+- **The price does not recover.** It drops at the shock and stays there for the rest of the run.
+  There is nothing in the model that knows the old price: providers place orders around the current
+  midpoint.
+- **The drop is half of the widening of the spread** (8 / 18 / 38 ticks against widenings of
+  16 / 36 / 76). The sell order removes the top of the bid side; the ask side does not move, so the
+  midpoint falls by half the gap. New orders then fill the gap around the new midpoint.
+- **The spread closes in one or two steps.** About 37 new limit orders arrive each step, and many
+  land inside the gap.
+- **The bid side refills as Eq. 1 predicts.** A shortfall shrinks by a factor (1 − δ) each step, which
+  gives a half-life of ln 2 / δ = 27.7 steps and 90% after ln 10 / δ = 92 steps (measured: 27–28 and
+  89–90). The refill time does not depend on the size of the shock.
+- The ask side is not affected.

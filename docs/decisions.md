@@ -92,7 +92,8 @@ It has not happened in any run.
 
 **D23. The baseline is git tag `baseline-v1`. [Checked]**
 It is the control model for Phase 2. With the new agents switched off, a run should give the same
-results as the baseline. This needs a test when the first new agent is added.
+results as the baseline. `tests/test_simulation.py` checks this against numbers recorded from the
+baseline code.
 
 ---
 
@@ -126,10 +127,29 @@ Fig. 4b is drawn as in the paper: signed Δp on a linear axis, probability on a 
 
 ---
 
-## 4. Still open
+## 4. Phase 2: shocks and recovery
+
+**D24. A shock is one market order of a given size, made of unit orders. [Assumed]**
+It is submitted at the end of a step, after that step's takers, so the price recorded for the step
+shows the full impact. It eats into the book from the best price outwards. It uses no random
+numbers, so a run with a shock is identical to the run without it up to that step.
+
+**D25. How recovery is measured. [Assumed]**
+- Curves are averaged over many runs first. One run is too noisy.
+- Level before = mean of the 200 steps before the shock. The price is measured from the step just
+  before the shock.
+- Impact = value at the shock step minus the level before.
+- Share recovered = how much of the impact is undone by the end (mean of the last 200 steps).
+- Half-life = steps until half of the impact is undone.
+
+---
+
+## 5. Still open
 
 - **Depth-profile fit (D14):** whether the paper fits each side separately or combined.
 - **Asymmetric flow (D16, D18):** the q_provider variant the paper mentions, and whether mirror vs
   blocked reflection matters.
-- **Phase 2 design choices:** crash definition, steps against real time, and how intermediaries
-  decide when to trade (`phase2_plan.md`). None decided yet.
+- **What "recovery" means for the price.** In the basic model the price does not come back after a
+  shock (`validation.md`, section 8). Either recovery means the book refilling, or something has to
+  be added that pulls the price back.
+- **Agents with different speeds and order sizes.** Not built yet.

@@ -28,6 +28,9 @@ markets", EPL 75, 510.
 - **Fig. 4 reproduced at paper scale**: `results/fig4.pkl` / `.png`, 10⁶ steps, 50 runs per N_A,
   commit acd8ebe; fat exponential tails whose widths match the paper's Fig. 4b (`validation.md`,
   section 5)
+- Shock test on the basic model: one large market order, then price, spread and orders per side are
+  recorded (D24, D25; `experiments/shock.py`). The book refills, the price does not come back
+  (`validation.md`, section 8)
 
 Code layout and how to run things: see `README.md`.
 
@@ -72,16 +75,30 @@ This is the methodological foundation — everything built later is compared aga
 
 ---
 
-## Phase 2: Large sell orders and flash crashes
+## Phase 2: Recovery after a flash crash or flash rally
 
-Planned in `phase2_plan.md`: a large seller and intermediaries with inventory limits are added to the
-Phase 1 model, based on Kirilenko et al. (2017). Four steps: large seller only; intermediaries with
-limited capacity; fast and slow intermediaries; interventions such as a trading pause. The earlier
-Phase 2–5 outline in this file is replaced by that plan.
+Direction set at the supervisor meeting on 13 October 2026: study how the market recovers after a
+large order, not what causes the crash. The first task is agents with different speeds and order
+sizes: 1 unit with a chance to act every step, 2 units every 2 steps, 4 units every 4 steps. Each
+type trades the same volume on average.
+
+Agreed so far:
+- Both providers and takers can have these types; providers first.
+- A slower agent still acts with a probability when its turn comes, not at a fixed rate.
+- Each agent has its own starting offset, so slow agents do not all act on the same steps.
+- An order of size 4 is cancelled as a whole.
+
+`phase2_plan.md` still describes the earlier plan (large seller, intermediaries with inventory
+limits) and needs rewriting.
 
 ---
 
 ## Immediate next steps
 
-1. Discuss `phase2_plan.md` at the first supervisor meeting.
-2. Phase 2, step 1: decide the crash definition, then add the large seller.
+1. Order sizes above 1 unit in the order book.
+2. The three agent types, with tests that each trades the same volume on average and that type 1
+   alone reproduces the baseline.
+3. Repeat the shock test with different mixes of the three types.
+4. Decide with supervisors what "recovery" means for the price, since it does not come back in the
+   basic model.
+5. Rewrite `phase2_plan.md` for the new direction.

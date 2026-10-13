@@ -38,6 +38,22 @@ from abm.agents import LiquidityProvider, LiquidityTaker
 from abm.buy_probability import SideProbability
 
 
+SHOCK_AGENT_ID = -1    # agent_id on the shock's orders, so its trades can be told apart
+
+
+@dataclass
+class Shock:
+    """One large market order injected into a run, to study how the book recovers afterwards.
+
+    It is made of `size` unit market orders, submitted one after another at the end of step `step`
+    (after that step's takers), so it eats into the book from the best price outwards.
+    side = Side.ASK is a sell (the price falls), Side.BID is a buy (the price rises).
+    step counts from 0 = first step after the pre-opening."""
+    step: int
+    size: int
+    side: Side = Side.ASK
+
+
 @dataclass
 class SimulationResult:
     """Everything you'd want to inspect or plot after a run."""
@@ -72,6 +88,15 @@ class SimulationResult:
     # The providers' mean entry depth lambda(t) used in each step. Filled only if run_simulation was
     # given a depth_coupling above 0 (Eq. 4, paper Fig. 4); empty otherwise.
     lambda_series: np.ndarray = field(default_factory=lambda: np.empty(0))
+
+    # The state of each side of the book at the end of every step. Filled only if
+    # run_simulation(record_sides=True); empty otherwise. Best prices are NaN while that side is empty.
+    best_bid_series: np.ndarray = field(default_factory=lambda: np.empty(0))
+    best_ask_series: np.ndarray = field(default_factory=lambda: np.empty(0))
+    n_bids_series: np.ndarray = field(default_factory=lambda: np.empty(0))     # resting buy orders
+    n_asks_series: np.ndarray = field(default_factory=lambda: np.empty(0))     # resting sell orders
+    # How many of the shock's unit orders found nothing left to trade against (0 if there was no shock).
+    shock_unfilled: int = 0
 
 
 def _accumulate_depth(book: OrderBook, depth_sum: Dict[int, int]) -> int:
@@ -129,6 +154,8 @@ def run_simulation(
     taker_flow: Optional[SideProbability] = None,
     depth_coupling: float = 0.0,
     q_rms: Optional[float] = None,
+    shock: Optional[Shock] = None,
+    record_sides: bool = False,
 ) -> SimulationResult:
     """
     Run the base Preis et al. model for n_steps, after a pre-opening
@@ -169,6 +196,13 @@ def run_simulation(
     is the takers' buy probability in that step and q_rms is sqrt(<(q - 1/2)^2>). 0 (the default) keeps
     the depth fixed at lambda_. It needs a taker_flow and q_rms. Providers and takers in a step use the
     same q(t). The values used are returned in result.lambda_series.
+
+    shock injects one large market order (see Shock) at the end of the given step. None (the default)
+    leaves the run exactly as it was without this option.
+
+    record_sides=True stores the best bid, best ask and number of resting orders on each side at the
+    end of every step (result.best_bid_series etc.). It uses no random numbers, so it does not change
+    the run.
     """
     if method not in ("fast", "agents"):
         raise ValueError(f"method must be 'fast' or 'agents', got {method!r}")
@@ -178,6 +212,10 @@ def run_simulation(
         raise ValueError("depth_coupling needs a taker_flow: lambda(t) depends on the takers' q(t)")
     if depth_coupling > 0 and not (q_rms and q_rms > 0):
         raise ValueError("depth_coupling needs q_rms > 0, the value of sqrt(<(q - 1/2)^2>) in Eq. 4")
+    if shock is not None and not (0 <= shock.step < n_steps):
+        raise ValueError(f"shock.step must be a recorded step, 0 to {n_steps - 1}")
+    if shock is not None and shock.size < 1:
+        raise ValueError("shock.size must be at least 1")
     fast = method == "fast"    #Checks which method has been selected
     check_stability_condition(alpha, mu, delta)
 
@@ -252,6 +290,10 @@ def run_simulation(
     n_depth_snapshots = 0
     q_taker_series = np.empty(n_steps) if taker_flow is not None else np.empty(0)
     lambda_series = np.empty(n_steps) if depth_coupling > 0 else np.empty(0)
+    n_side = n_steps if record_sides else 0
+    best_bid_series, best_ask_series = np.full(n_side, np.nan), np.full(n_side, np.nan)
+    n_bids_series, n_asks_series = np.zeros(n_side, dtype=int), np.zeros(n_side, dtype=int)
+    shock_unfilled = 0
 
     for t in range(pre_opening_steps, pre_opening_steps + n_steps):
         step = t - pre_opening_steps
@@ -268,8 +310,25 @@ def run_simulation(
             q_taker_series[step] = q_now
             taker_flow.advance(rng)             # next step's value; step 0 used the starting value
 
+        if shock is not None and step == shock.step:
+            # One large market order = shock.size unit orders in a row. It uses no random numbers.
+            for i in range(shock.size):
+                outcome, _ = book.submit_market_order(shock.side, t, agent_id=SHOCK_AGENT_ID)
+                if outcome is OrderResult.NO_MATCH:     # that side of the book is now empty
+                    shock_unfilled = shock.size - i
+                    break
+
         mid_price_series.append(book.mid_price())
         total_orders_series.append(book.total_orders())
+        if record_sides:
+            best_bid, best_ask = book.best_bid(), book.best_ask()
+            if best_bid is not None:
+                best_bid_series[step] = best_bid
+            if best_ask is not None:
+                best_ask_series[step] = best_ask
+            n_bids = sum(map(len, book.bids.values()))
+            n_bids_series[step] = n_bids
+            n_asks_series[step] = book.total_orders() - n_bids     # every resting order is a bid or an ask
 
         if record_trade_prices and step_trade_prices:
             trade_price_steps["first"][step] = step_trade_prices[0]
@@ -292,6 +351,11 @@ def run_simulation(
         trade_price_steps=trade_price_steps,
         q_taker_series=q_taker_series,
         lambda_series=lambda_series,
+        best_bid_series=best_bid_series,
+        best_ask_series=best_ask_series,
+        n_bids_series=n_bids_series,
+        n_asks_series=n_asks_series,
+        shock_unfilled=shock_unfilled,
     )
 
 

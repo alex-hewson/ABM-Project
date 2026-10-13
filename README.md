@@ -48,8 +48,8 @@ lines). The tail widths match the paper's Fig. 4b to within reading error: for e
 | Folder | Contents |
 |---|---|
 | `abm/` | The model: `orderbook.py` (matching engine), `agents.py` (liquidity providers / takers), `buy_probability.py` (how the takers' buy probability changes over time, Figs. 3 and 4), `simulation.py` (step loop, runs agents through orderbook) |
-| `analysis/` | Measurements on one simulation's output: `prices.py` (price series), `hurst.py` (Hurst exponent), `returns.py` (return distributions), `depth_profile.py` (depth profile + lognormal fit) |
-| `experiments/` | Reproducing the paper's figures: `run.py` (runs many simulations and saves the results), `plot.py` (draws Fig. 2, 3 or 4 from saved results); `checkpoint.py` and `provenance.py` are support code these two use, not called directly |
+| `analysis/` | Measurements on one simulation's output: `prices.py` (price series), `hurst.py` (Hurst exponent), `returns.py` (return distributions), `depth_profile.py` (depth profile + lognormal fit), `recovery.py` (how far a shock moves the book and how much is undone) |
+| `experiments/` | Reproducing the paper's figures: `run.py` (runs many simulations and saves the results), `plot.py` (draws Fig. 2, 3 or 4 from saved results); `checkpoint.py` and `provenance.py` are support code these two use, not called directly. `shock.py` is the shock test: one large market order, then the book is watched as it refills |
 | `tests/` | One test file per file above |
 | `docs/` | `project_plan.md` (status and next steps), `paper_model.md` (the model as the paper defines it), `decisions.md` (assumptions and choices made where the paper is unclear, to note in the thesis), `validation.md` (the tests and numbers behind them, and the comparison with the paper), `phase2_plan.md` (draft plan for the flash-crash work), `figures/` (the final plots shown above) |
 | `results/` | Generated data and plots (not tracked by git) |
@@ -65,6 +65,7 @@ analysis/*.py             turns a SimulationResult into numbers
   hurst.py                   Hurst exponent, from RMS price changes
   returns.py                 return-distribution histograms
   depth_profile.py           depth profile + its lognormal fit
+  recovery.py                response to a shock: impact, share recovered, recovery time
         |
         v
 experiments/run.py        runs MANY simulations (parallel, resumable),
@@ -140,6 +141,19 @@ refuses if the settings, the flow, the entry depth or the code version differ fr
 (`--allow-code-change` overrides the code check when the change is known not to affect the
 simulation). If a run fails or the experiment is stopped with Ctrl+C, the runs still queued are
 cancelled at once rather than run to completion.
+
+### Shock test
+
+Injects one large market sell order into the basic model after the book has settled, and records the
+price, the spread and the number of orders on each side afterwards, averaged over many runs. Size 0
+is the control with no shock. It takes about 15 minutes on a 4-core laptop at these settings:
+
+```
+python -m experiments.shock --sizes 0 50 150 300 --n-runs 400 --out results/shock_test.png
+```
+
+`--buy` injects a buy order instead. A summary table is printed, and the averaged curves are saved
+next to the figure as a `.pkl` file.
 
 ## Requirements
 

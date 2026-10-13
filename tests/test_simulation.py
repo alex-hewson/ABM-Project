@@ -11,11 +11,13 @@ Eq. 1). At the paper's Fig. 2 parameters the two possible orders differ by only
 ~14% and the test can actually tell them apart.
 """
 
+import hashlib
+
 import numpy as np
 
 from abm.orderbook import Side
 from abm.buy_probability import ConstantSide, BoundedRandomWalk, MeanRevertingWalk
-from abm.simulation import run_simulation, check_stability_condition
+from abm.simulation import run_simulation, check_stability_condition, Shock, SHOCK_AGENT_ID
 
 
 def check(label, condition):
@@ -261,6 +263,99 @@ def test_depth_coupling_is_validated():
         depth_coupling=10, q_rms=0.0158, **kwargs)))
     check("coupling without q_rms rejected", raises_value_error(lambda: run_simulation(
         taker_flow=MeanRevertingWalk(), depth_coupling=10, **kwargs)))
+
+def run_fingerprint(result):
+    """A few numbers that pin down a whole run: any change to the model's behaviour changes them."""
+    mids = np.array([np.nan if m is None else m for m in result.mid_price_series])
+    orders = np.array(result.total_orders_series, dtype=np.int64)
+    digest = hashlib.sha256(mids.tobytes() + orders.tobytes()).hexdigest()[:16]
+    return (result.n_trades, result.mid_price_series[-1], int(orders.sum()), digest)
+
+
+def test_baseline_runs_are_unchanged():
+    """D23: with every later option switched off, a run must be exactly the baseline-v1 run.
+    The expected numbers were recorded from the baseline-v1 code (Python 3.14, same seed). A
+    different Python version may draw different random numbers and so fail this test without the
+    model having changed."""
+    kwargs = dict(n_agents=125, alpha=0.15, mu=0.025, delta=0.025, lambda_=100, n_steps=2000, seed=7)
+    check("fast method, symmetric flow",
+          run_fingerprint(run_simulation(method="fast", **kwargs)) == (6354, 999958.0, 1191216, "a389d34531df7fca"))
+    check("per-agent method, symmetric flow",
+          run_fingerprint(run_simulation(method="agents", **kwargs)) == (6289, 999953.0, 1198539, "11703c537bb45397"))
+    walk = MeanRevertingWalk()
+    eq4 = run_simulation(taker_flow=walk, depth_coupling=10, q_rms=walk.stationary_rms, **kwargs)
+    check("mean-reverting walk with Eq. 4", run_fingerprint(eq4) == (6101, 1000114.5, 1194788, "72a6cd9711c108d4"))
+
+
+SHOCK_KWARGS = dict(n_agents=125, alpha=0.15, mu=0.025, delta=0.025, lambda_=100, n_steps=600, seed=11)
+
+
+def test_recording_the_sides_does_not_change_the_run():
+    plain = run_simulation(**SHOCK_KWARGS)
+    sides = run_simulation(record_sides=True, **SHOCK_KWARGS)
+    check("same run with and without record_sides", run_fingerprint(plain) == run_fingerprint(sides))
+    check("off by default: the side series are empty", len(plain.best_bid_series) == 0 and len(plain.n_bids_series) == 0)
+    check("one entry per step", len(sides.best_bid_series) == 600 and len(sides.n_asks_series) == 600)
+    check("bids + asks = total orders, every step",
+          np.array_equal(sides.n_bids_series + sides.n_asks_series, np.array(sides.total_orders_series)))
+    check("the final counts match the final book, counted side by side",
+          sides.n_bids_series[-1] == len(sides.book.resting_order_ids(Side.BID))
+          and sides.n_asks_series[-1] == len(sides.book.resting_order_ids(Side.ASK)))
+    mids = np.array(sides.mid_price_series, dtype=float)
+    check("midpoint = (best bid + best ask) / 2, every step",
+          np.array_equal((sides.best_bid_series + sides.best_ask_series) / 2, mids))
+    check("the final entries describe the final book",
+          sides.best_bid_series[-1] == sides.book.best_bid() and sides.best_ask_series[-1] == sides.book.best_ask())
+
+
+def test_sell_shock_removes_exactly_its_size_from_the_bids():
+    step, size = 400, 60
+    plain = run_simulation(record_sides=True, **SHOCK_KWARGS)
+    hit = run_simulation(record_sides=True, shock=Shock(step=step, size=size), **SHOCK_KWARGS)
+    check("identical up to the step before the shock",
+          plain.mid_price_series[:step] == hit.mid_price_series[:step]
+          and np.array_equal(plain.n_bids_series[:step], hit.n_bids_series[:step]))
+    check(f"at the shock step the bid side holds exactly {size} fewer orders",
+          plain.n_bids_series[step] - hit.n_bids_series[step] == size)
+    check("the ask side is untouched at the shock step", plain.n_asks_series[step] == hit.n_asks_series[step]
+          and plain.best_ask_series[step] == hit.best_ask_series[step])
+    check("the best bid, and so the midpoint, falls", hit.best_bid_series[step] < plain.best_bid_series[step]
+          and hit.mid_price_series[step] < plain.mid_price_series[step])
+    shock_trades = [tr for tr in hit.book.trades if tr.aggressor_agent_id == SHOCK_AGENT_ID]
+    check(f"the shock made exactly {size} trades, all sells, all in the shock step",
+          len(shock_trades) == size and all(tr.aggressor_side is Side.ASK for tr in shock_trades)
+          and len({tr.timestamp for tr in shock_trades}) == 1)
+    prices = [tr.price for tr in shock_trades]
+    check("it worked down through the bids: each trade at the same or a lower price", prices == sorted(prices, reverse=True))
+    check("fully filled", hit.shock_unfilled == 0 and plain.shock_unfilled == 0)
+
+
+def test_buy_shock_is_the_mirror_image():
+    step, size = 400, 60
+    plain = run_simulation(record_sides=True, **SHOCK_KWARGS)
+    hit = run_simulation(record_sides=True, shock=Shock(step=step, size=size, side=Side.BID), **SHOCK_KWARGS)
+    check(f"the ask side holds exactly {size} fewer orders", plain.n_asks_series[step] - hit.n_asks_series[step] == size)
+    check("the bid side is untouched", plain.n_bids_series[step] == hit.n_bids_series[step])
+    check("the midpoint rises", hit.mid_price_series[step] > plain.mid_price_series[step])
+
+
+def test_shock_larger_than_the_book_side_empties_it():
+    step = 400
+    plain = run_simulation(record_sides=True, **SHOCK_KWARGS)
+    bids_before = int(plain.n_bids_series[step])
+    hit = run_simulation(record_sides=True, shock=Shock(step=step, size=bids_before + 25), **SHOCK_KWARGS)
+    check("the bid side is empty at the shock step", hit.n_bids_series[step] == 0 and np.isnan(hit.best_bid_series[step]))
+    check("with no bids there is no midpoint", hit.mid_price_series[step] is None)
+    check("the 25 orders that found no buyer are reported", hit.shock_unfilled == 25)
+
+
+def test_shock_parameters_are_validated():
+    check("shock before the first step rejected", raises_value_error(
+        lambda: run_simulation(shock=Shock(step=-1, size=5), **SHOCK_KWARGS)))
+    check("shock after the last step rejected", raises_value_error(
+        lambda: run_simulation(shock=Shock(step=600, size=5), **SHOCK_KWARGS)))
+    check("shock of size 0 rejected", raises_value_error(
+        lambda: run_simulation(shock=Shock(step=10, size=0), **SHOCK_KWARGS)))
 
 
 if __name__ == "__main__":
