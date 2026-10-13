@@ -465,6 +465,88 @@ def test_fast_and_per_agent_methods_agree_for_a_mixed_population():
     check(f"units traded per step: fast {t_fast:.2f} vs per-agent {t_agents:.2f}, within 2%",
           abs(t_fast - t_agents) < 0.02 * t_agents)
 
+VALUE_KWARGS = dict(n_agents=250, alpha=0.15, mu=0.025, delta=0.025, lambda_=100)
+
+
+def test_value_trader_settings_are_validated():
+    kwargs = dict(n_steps=10, **VALUE_KWARGS)
+    check("more value traders than agents rejected", raises_value_error(
+        lambda: run_simulation(n_value_traders=251, **kwargs)))
+    check("a negative number rejected", raises_value_error(lambda: run_simulation(n_value_traders=-1, **kwargs)))
+    check("a window of 0 steps rejected", raises_value_error(
+        lambda: run_simulation(n_value_traders=10, value_window=0, **kwargs)))
+    check("a negative spread rejected", raises_value_error(
+        lambda: run_simulation(n_value_traders=10, value_spread=-1.0, **kwargs)))
+    check("a taker mix must add up to the takers that are left", raises_value_error(
+        lambda: run_simulation(n_value_traders=100, taker_mix={AgentType(1, 1): 250}, **kwargs)))
+    ok = run_simulation(n_value_traders=100, taker_mix={AgentType(1, 1): 100, AgentType(2, 2): 50}, **kwargs)
+    check("100 value traders + 150 takers runs", len(ok.mid_price_series) == 10)
+    check("every agent can be a value trader", len(run_simulation(n_value_traders=250, **kwargs).value_shifts) == 250)
+
+
+def test_without_value_traders_nothing_about_them_is_recorded():
+    r = run_simulation(n_steps=50, seed=1, **VALUE_KWARGS)
+    check("no reference series and no shifts", len(r.reference_series) == 0 and len(r.value_shifts) == 0)
+
+
+def test_reference_price_is_the_mean_of_the_recent_mid_prices():
+    window = 50
+    r = run_simulation(n_steps=400, seed=5, n_value_traders=100, value_window=window, **VALUE_KWARGS)
+    mids = np.array(r.mid_price_series, dtype=float)
+    check("before there is any history the reference is the start price", r.reference_series[0] == 1_000_000)
+    check("after 10 steps it is the mean of those 10 mid-prices",
+          abs(r.reference_series[10] - mids[:10].mean()) < 1e-6)
+    check("after that it is the mean of the last 50, at every step",
+          all(abs(r.reference_series[s] - mids[s - window:s].mean()) < 1e-6 for s in range(window, 400)))
+    check("one shift per value trader, some above the reference and some below",
+          len(r.value_shifts) == 100 and (r.value_shifts > 0).any() and (r.value_shifts < 0).any())
+
+
+def test_market_stays_healthy_with_value_traders():
+    r = run_simulation(n_steps=4000, seed=6, n_value_traders=125, record_sides=True, **VALUE_KWARGS)
+    volume = settled_volume(r)
+    eq2 = eq2_equilibrium_orders(250, 0.15, 0.025, 0.025)
+    check(f"settled volume {volume:.0f} within 8% of Eq. 2's {eq2:.0f}", abs(volume - eq2) < 0.08 * eq2)
+    check("no market order went unfilled", r.n_match_failures == 0)
+    check("both sides of the book always held orders", not np.isnan(r.best_bid_series).any()
+          and not np.isnan(r.best_ask_series).any())
+
+
+def mean_rebound_after_shock(n_value_traders, seeds=20, warmup=1500, later=30):
+    """A 300-unit sell knocks the mid-price down by about 37 ticks. This is how far it has come back
+    up `later` steps afterwards, averaged over seeds. A short wait is used on purpose: over 30 steps
+    the price wanders by about 15 ticks in one run, over 200 steps by about 35."""
+    rebounds = []
+    for seed in range(seeds):
+        r = run_simulation(n_steps=warmup + later + 1, seed=seed, shock=Shock(step=warmup, size=300),
+                           n_value_traders=n_value_traders, value_spread=10.0, keep_trades=False, **VALUE_KWARGS)
+        rebounds.append(r.mid_price_series[warmup + later] - r.mid_price_series[warmup])
+    return float(np.mean(rebounds))
+
+
+def test_price_recovers_after_a_shock_only_with_value_traders():
+    without = mean_rebound_after_shock(n_value_traders=0)
+    with_traders = mean_rebound_after_shock(n_value_traders=125)
+    check(f"without value traders the price does not come back ({without:+.1f} ticks after 30 steps, below +12)",
+          without < 12)
+    check(f"with 125 value traders it comes most of the way back ({with_traders:+.1f} ticks, above +20)",
+          with_traders > 20)
+
+
+def test_fast_and_per_agent_methods_agree_with_value_traders():
+    stats = {}
+    for method in ("fast", "agents"):
+        volumes, spreads = [], []
+        for seed in range(5):
+            r = run_simulation(n_steps=1500, seed=seed, method=method, n_value_traders=125, record_sides=True,
+                               **VALUE_KWARGS)
+            volumes.append(settled_volume(r))
+            spreads.append(float(np.mean((r.best_ask_series - r.best_bid_series)[750:])))
+        stats[method] = (float(np.mean(volumes)), float(np.mean(spreads)))
+    (v_fast, s_fast), (v_agents, s_agents) = stats["fast"], stats["agents"]
+    check(f"settled volume: fast {v_fast:.0f} vs per-agent {v_agents:.0f}, within 3%", abs(v_fast - v_agents) < 0.03 * v_agents)
+    check(f"mean spread: fast {s_fast:.1f} vs per-agent {s_agents:.1f}, within 10%", abs(s_fast - s_agents) < 0.10 * s_agents)
+
 
 if __name__ == "__main__":
     for name, fn in list(globals().items()):

@@ -18,10 +18,11 @@ def check(label, condition):
 
 
 WARMUP, AFTER = 300, 250
+NO_VALUE_TRADERS = (0, 1000, 50.0)       # (how many, window, spread): none, so the last two are unused
 
 
 def test_each_run_returns_one_window_per_quantity():
-    r = run_one((40, 3, WARMUP, AFTER, False, None, None))
+    r = run_one((40, 3, WARMUP, AFTER, False, None, None, NO_VALUE_TRADERS))
     check("all four quantities are returned", all(q in r for q in QUANTITIES))
     check("each window has BEFORE + 1 + after values", all(len(r[q]) == BEFORE + 1 + AFTER for q in QUANTITIES))
     check("the price is measured from the step before the shock", r["price"][BEFORE - 1] == 0.0)
@@ -29,9 +30,9 @@ def test_each_run_returns_one_window_per_quantity():
 
 
 def test_same_seed_is_identical_until_the_shock():
-    control = run_one((0, 3, WARMUP, AFTER, False, None, None))
-    sell = run_one((40, 3, WARMUP, AFTER, False, None, None))
-    buy = run_one((40, 3, WARMUP, AFTER, True, None, None))
+    control = run_one((0, 3, WARMUP, AFTER, False, None, None, NO_VALUE_TRADERS))
+    sell = run_one((40, 3, WARMUP, AFTER, False, None, None, NO_VALUE_TRADERS))
+    buy = run_one((40, 3, WARMUP, AFTER, True, None, None, NO_VALUE_TRADERS))
     check("before the shock, the control and the shocked run agree on every quantity",
           all(np.array_equal(control[q][:BEFORE], sell[q][:BEFORE]) for q in QUANTITIES))
     check("the sell order takes 40 units off the bid side at the shock step",
@@ -70,12 +71,22 @@ def test_mix_description():
 
 
 def test_a_run_with_slow_big_providers_supplies_the_same_volume():
-    slow = run_one((0, 3, 600, AFTER, False, {AgentType(4, 4): 250}, None))
-    plain = run_one((0, 3, 600, AFTER, False, None, None))
+    slow = run_one((0, 3, 600, AFTER, False, {AgentType(4, 4): 250}, None, NO_VALUE_TRADERS))
+    plain = run_one((0, 3, 600, AFTER, False, None, None, NO_VALUE_TRADERS))
     slow_volume = float(slow["bid_volume"].mean() + slow["ask_volume"].mean())
     plain_volume = float(plain["bid_volume"].mean() + plain["ask_volume"].mean())
     check(f"resting volume with 4-step providers ({slow_volume:.0f}) within 6% of the paper's population ({plain_volume:.0f})",
           abs(slow_volume - plain_volume) < 0.06 * plain_volume)
+
+
+def test_a_run_with_value_traders_differs_only_by_having_them():
+    plain = run_one((0, 3, WARMUP, AFTER, False, None, None, NO_VALUE_TRADERS))
+    again = run_one((0, 3, WARMUP, AFTER, False, None, None, (0, 77, 5.0)))
+    with_traders = run_one((0, 3, WARMUP, AFTER, False, None, None, (125, 100, 20.0)))
+    check("with 0 value traders the window and spread settings change nothing",
+          all(np.array_equal(plain[q], again[q]) for q in QUANTITIES))
+    check("with 125 value traders the run is a different one", not np.array_equal(plain["spread"], with_traders["spread"]))
+    check("and the book still has both sides throughout", np.all(with_traders["spread"] > 0))
 
 
 if __name__ == "__main__":

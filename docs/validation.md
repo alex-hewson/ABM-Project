@@ -239,3 +239,37 @@ Sizes 150 and 300, mean of 200 runs each (`results/shock_providers2.png`, `shock
   Whether that difference is real has not been checked.
 - Only averages over runs were compared. Bigger, slower orders should make single runs lumpier,
   which an average does not show.
+
+## 10. Shock test with value traders
+
+The shock test of section 8, with some of the 250 takers replaced by value traders (D28). Sell orders
+of 150 and 300 units, mean of 200 runs each (`results/shock_value50.png`, `shock_value125.png`,
+`shock_value125_spread10.png`; commit a6777e4 plus the value trader code). The first row is section 8.
+
+Price change in ticks, measured from the step before the shock, for the 300-unit order:
+
+| Value traders | Mean shift | At the shock | +10 steps | +50 | +100 | +200 | +500 | Half-life |
+|---|---|---|---|---|---|---|---|---|
+| none | – | −38.0 | −39.2 | −37.7 | −36.8 | −36.8 | −39.7 | never |
+| 50 | 50 ticks | −37.7 | −31.3 | −23.2 | −18.5 | −10.8 | −5.9 | 101 steps |
+| 125 | 50 ticks | −36.3 | −17.9 | −9.1 | −6.0 | −2.0 | −1.2 | 10 steps |
+| 125 | 10 ticks | −34.1 | −7.5 | 0.0 | 0.0 | 0.0 | −0.2 | 3 steps |
+
+- **With value traders the price comes back.** With 125 of them it recovers half of the drop in 10
+  steps and 90% in 136 steps. The 150-unit order behaves the same way (half-life 13 steps).
+- **More value traders, or values closer together, give a faster recovery.** With 50 traders the
+  half-life is about 100 steps. With shifts of 10 ticks instead of 50 it is 3 steps.
+- **The size of the first drop barely changes** (−34 to −38 ticks). The value traders act after the
+  shock, not during it.
+- **The bid side refills as before:** half-life 25–27 steps, 90% after 80–93 steps. The refill is still
+  set by δ (section 8). So the price recovers faster than the book when there are many value traders.
+- **The market stays stable.** No market order went unfilled. The book holds slightly more (613–648
+  units per side against 606).
+- **Side effects in normal times.** The spread is narrower (20.7, 18.1 and 12.4 ticks against 23.2),
+  because value traders often rest orders inside it. In a trial of 48 runs the price also wandered
+  less: a standard deviation of 8 ticks over 2,000 steps against 18.5 without value traders.
+
+Checked in `tests/test_simulation.py`: 30 steps after a 300-unit sell, the price has come back by 32
+ticks on average with 125 value traders (mean shift 10) and by 6 ticks without (20 runs each; the 6
+is noise). The fast and per-agent methods agree with value traders present (volume 1238 vs 1243,
+spread 18.1 vs 18.5).

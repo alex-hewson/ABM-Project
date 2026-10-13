@@ -29,13 +29,14 @@ from __future__ import annotations
 
 import itertools
 import random
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Dict, List, Mapping, Optional
 
 import numpy as np
 
 from abm.orderbook import OrderBook, Side, OrderResult
-from abm.agents import LiquidityProvider, LiquidityTaker, AgentType
+from abm.agents import LiquidityProvider, LiquidityTaker, ValueTrader, AgentType, draw_value_shift
 from abm.buy_probability import SideProbability
 
 
@@ -101,6 +102,10 @@ class SimulationResult:
     ask_volume_series: np.ndarray = field(default_factory=lambda: np.empty(0))  # resting units, sell side
     # How many units of the shock found nothing left to trade against (0 if there was no shock).
     shock_unfilled: int = 0
+    # Value traders (filled only if run_simulation had n_value_traders above 0): the shared reference
+    # price they used in each step, and each trader's own fixed shift from it.
+    reference_series: np.ndarray = field(default_factory=lambda: np.empty(0))
+    value_shifts: np.ndarray = field(default_factory=lambda: np.empty(0))
 
 
 def _accumulate_depth(book: OrderBook, depth_sum: Dict[int, int]) -> int:
@@ -187,6 +192,9 @@ def run_simulation(
     record_sides: bool = False,
     provider_mix: Optional[Mapping[AgentType, int]] = None,
     taker_mix: Optional[Mapping[AgentType, int]] = None,
+    n_value_traders: int = 0,
+    value_window: int = 1000,
+    value_spread: float = 50.0,
 ) -> SimulationResult:
     """
     Run the base Preis et al. model for n_steps, after a pre-opening
@@ -242,6 +250,15 @@ def run_simulation(
     None (the default) is the paper's population. Agents of a slower type are spread evenly over the
     steps: the i-th agent of a type has offset i % interval, so about the same number get their
     chance on every step. On its step an agent still acts with probability alpha (or mu), as before.
+
+    n_value_traders turns that many of the n_agents takers into value traders (see ValueTrader in
+    agents.py); 0 (the default) leaves the run exactly as it was. They act at the same rate mu, so the
+    number of orders per step is unchanged. Their shared reference price is the mean of the mid-price
+    at the end of the last value_window steps (the start price until there is any history). Each
+    trader's own value is the reference plus a fixed shift, + or - with equal chance and exponentially
+    distributed with mean value_spread ticks. If taker_mix is given with value traders, it must add
+    up to the takers that are left, n_agents - n_value_traders. The reference used in each step is
+    returned in result.reference_series.
     """
     if method not in ("fast", "agents"):
         raise ValueError(f"method must be 'fast' or 'agents', got {method!r}")
@@ -255,8 +272,14 @@ def run_simulation(
         raise ValueError(f"shock.step must be a recorded step, 0 to {n_steps - 1}")
     if shock is not None and shock.size < 1:
         raise ValueError("shock.size must be at least 1")
+    if not (0 <= n_value_traders <= n_agents):
+        raise ValueError(f"n_value_traders must be between 0 and n_agents = {n_agents}")
+    if value_window < 1:
+        raise ValueError("value_window must be at least 1 step")
+    if value_spread < 0:
+        raise ValueError("value_spread must be 0 or more")
     provider_mix = _check_mix(provider_mix, n_agents, "provider_mix")
-    taker_mix = _check_mix(taker_mix, n_agents, "taker_mix")
+    taker_mix = _check_mix(taker_mix, n_agents - n_value_traders, "taker_mix")
     fast = method == "fast"    #Checks which method has been selected
     check_stability_condition(alpha, mu, delta)
 
@@ -278,7 +301,18 @@ def run_simulation(
                        interval=agent_type.interval, size=agent_type.size, offset=i % agent_type.interval)
         for agent_type, count in taker_mix.items() for i in range(count)
     ]
-    provider_turns, taker_turns = _turn_lists(providers), _turn_lists(takers)
+    # Value traders take the place of some of the takers. Each draws its own shift once, here.
+    value_traders = [
+        ValueTrader(agent_id=next(taker_ids), mu=mu, shift=draw_value_shift(rng, value_spread))
+        for _ in range(n_value_traders)
+    ]
+    provider_turns, taker_turns, value_turns = _turn_lists(providers), _turn_lists(takers), _turn_lists(value_traders)
+    recent_mids: deque = deque()      # mid-prices of the last value_window steps, for the reference price
+    recent_mids_sum = 0.0
+
+    def reference_price() -> float:
+        """The value traders' shared reference: the mean of the recent mid-prices."""
+        return recent_mids_sum / len(recent_mids) if recent_mids else float(p0)
 
     def acting_agents(turns: List[List[List[int]]], t: int, probability: float) -> List[int]:
         """Fast method: the agents that act in step t. For each type, take the agents whose turn it
@@ -320,22 +354,40 @@ def run_simulation(
                     if rng.random() < delta:
                         book.cancel_order(order_id)
 
-    def takers_act(t: int, q: Optional[float]) -> int:
+    def takers_act(t: int, q: Optional[float], reference: float) -> int:
         """Returns the number of market orders that were not filled completely (the book side
         they needed was empty, or ran out part-way through a bigger order).
         Also submits the takers orders, under normal conditions failures should stay 0.
         q, if not None, is this step's shared buy probability (asymmetric flow); None means
-        each taker uses its own fixed q_taker."""
+        each taker uses its own fixed q_taker.
+        Value traders act in this part of the step too, with reference as their shared reference
+        price. Their orders are limit orders, so they are never counted as failures."""
         failures = 0
-        if fast:
+        if fast and not value_traders:
             for i in acting_agents(taker_turns, t, mu):
                 if takers[i].submit(book, t, rng, q_taker=q) is not OrderResult.EXECUTED:
                     failures += 1
-        else:
-            for taker in takers:
-                outcome = taker.maybe_submit(book, timestamp=t, rng=rng, q_taker=q)
-                if outcome is not None and outcome is not OrderResult.EXECUTED:
+        elif fast:
+            # Takers and value traders act in one random order, so neither always goes first.
+            acting = [(takers[i], False) for i in acting_agents(taker_turns, t, mu)] \
+                + [(value_traders[i], True) for i in acting_agents(value_turns, t, mu)]
+            rng.shuffle(acting)
+            for agent, is_value_trader in acting:
+                if is_value_trader:
+                    agent.submit(book, t, reference)
+                elif agent.submit(book, t, rng, q_taker=q) is not OrderResult.EXECUTED:
                     failures += 1
+        else:
+            everyone = takers + value_traders
+            if value_traders:
+                rng.shuffle(everyone)       # one random order, as in the fast method
+            for agent in everyone:
+                if isinstance(agent, ValueTrader):
+                    agent.maybe_submit(book, timestamp=t, reference=reference, rng=rng)
+                else:
+                    outcome = agent.maybe_submit(book, timestamp=t, rng=rng, q_taker=q)
+                    if outcome is not None and outcome is not OrderResult.EXECUTED:
+                        failures += 1
         return failures
 
     # --- Pre-opening: providers only, so takers never face an empty book ---
@@ -357,6 +409,7 @@ def run_simulation(
     n_bids_series, n_asks_series = np.zeros(n_side, dtype=int), np.zeros(n_side, dtype=int)
     bid_volume_series, ask_volume_series = np.zeros(n_side, dtype=int), np.zeros(n_side, dtype=int)
     shock_unfilled = 0
+    reference_series = np.empty(n_steps) if value_traders else np.empty(0)
 
     for t in range(pre_opening_steps, pre_opening_steps + n_steps):
         step = t - pre_opening_steps
@@ -368,7 +421,10 @@ def run_simulation(
 
         providers_act(t, lambda_now)            # 1. Providers act
         cancellation_sweep()                    # 2. Each resting order removed w.p. delta
-        n_match_failures += takers_act(t, q_now)    # 3. Takers act
+        reference_now = reference_price() if value_traders else 0.0
+        if value_traders:
+            reference_series[step] = reference_now
+        n_match_failures += takers_act(t, q_now, reference_now)    # 3. Takers (and value traders) act
         if taker_flow is not None:
             q_taker_series[step] = q_now
             taker_flow.advance(rng)             # next step's value; step 0 used the starting value
@@ -379,8 +435,15 @@ def run_simulation(
             book.submit_market_order(shock.side, t, agent_id=SHOCK_AGENT_ID, quantity=shock.size)
             shock_unfilled = shock.size - (book.volume_traded - traded_before)   # above 0 if that side ran out
 
-        mid_price_series.append(book.mid_price())
+        mid_now = book.mid_price()
+        mid_price_series.append(mid_now)
         total_orders_series.append(book.total_orders())
+        if value_traders and mid_now is not None:
+            # Keep the last value_window mid-prices and their sum, for the next step's reference.
+            recent_mids.append(mid_now)
+            recent_mids_sum += mid_now
+            if len(recent_mids) > value_window:
+                recent_mids_sum -= recent_mids.popleft()
         if record_sides:
             best_bid, best_ask = book.best_bid(), book.best_ask()
             if best_bid is not None:
@@ -420,6 +483,8 @@ def run_simulation(
         bid_volume_series=bid_volume_series,
         ask_volume_series=ask_volume_series,
         shock_unfilled=shock_unfilled,
+        reference_series=reference_series,
+        value_shifts=np.array([v.shift for v in value_traders]),
     )
 
 

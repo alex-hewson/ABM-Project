@@ -36,6 +36,8 @@ markets", EPL 75, 510.
 - Agent types with different speeds and order sizes, for providers and takers, in any mix (D27).
   Each type trades the same volume, and the first type alone is exactly the baseline
   (`validation.md`, section 1)
+- Value traders, which buy below their own value and sell above it (D28). With them the price
+  recovers after a shock; without them it never does (`validation.md`, section 10)
 
 Code layout and how to run things: see `README.md`.
 
@@ -82,6 +84,13 @@ This is the methodological foundation — everything built later is compared aga
 
 ## Phase 2: Recovery after a flash crash or flash rally
 
+Aim, as set by the supervisors: study how the market recovers after a large order, and validate the
+model against a traditional market using real order book data (E-mini futures data from Dr Karam,
+expected mid-October 2026). Crypto or prediction markets are an optional extension if time allows.
+
+Agents that ignore the market cannot make the price recover (`validation.md`, sections 8 and 9), so
+agents that react to it are being added, starting with value traders (D28).
+
 Direction set at the supervisor meeting on 13 October 2026: study how the market recovers after a
 large order, not what causes the crash. The first task is agents with different speeds and order
 sizes: 1 unit with a chance to act every step, 2 units every 2 steps, 4 units every 4 steps. Each
@@ -100,9 +109,10 @@ limits) and needs rewriting.
 
 ## Immediate next steps
 
-1. Look for what the agent types do change, since the average recovery is the same for every
-   provider mix tried (`validation.md`, section 9): the spread of single runs, taker types, and
-   speed and size varied separately.
-2. Decide with supervisors what "recovery" means for the price, since it does not come back in the
-   basic model.
-3. Rewrite `phase2_plan.md` for the new direction.
+1. Measure what value traders do to the price in normal times: Hurst exponent, return
+   distributions, and volatility clustering (not yet measured at all).
+2. Give value traders the speed and size types (D27), to see whether fast and slow value traders
+   recover differently.
+3. When the E-mini data arrives: find out its form and the rules for using it, keep it out of the
+   repository, then measure order rates and the response to large orders in it.
+4. Rewrite `phase2_plan.md` for the new direction.

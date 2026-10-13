@@ -10,7 +10,8 @@ side probabilities q_provider / q_taker decide bid vs ask / buy vs sell.
 import random
 
 from abm.orderbook import OrderBook, Side, OrderResult
-from abm.agents import LiquidityProvider, LiquidityTaker, AgentType, is_turn
+from abm.agents import (LiquidityProvider, LiquidityTaker, AgentType, is_turn, ValueTrader,
+                        draw_value_shift, market_price)
 
 
 def check(label, condition):
@@ -271,6 +272,114 @@ def test_sized_taker_reports_a_partial_fill():
     book.submit_limit_order(Side.ASK, 101, 0, quantity=3)
     taker = LiquidityTaker(agent_id=1, mu=1.0, q_taker=1.0, size=4)
     check("only 3 of its 4 units could trade: PARTIAL", taker.submit(book, 0, random.Random(0)) is OrderResult.PARTIAL)
+
+def book_with_spread(bid=99, ask=101):
+    """One bid and one ask, so the midpoint is half way between them (100 by default)."""
+    book = OrderBook()
+    book.submit_limit_order(Side.BID, bid, 0, agent_id="bidder")
+    book.submit_limit_order(Side.ASK, ask, 0, agent_id="asker")
+    return book
+
+
+def test_value_shift_is_plus_or_minus_an_exponential():
+    rng = random.Random(0)
+    shifts = [draw_value_shift(rng, 50.0) for _ in range(20_000)]
+    mean = sum(shifts) / len(shifts)
+    mean_size = sum(abs(x) for x in shifts) / len(shifts)
+    share_positive = sum(x > 0 for x in shifts) / len(shifts)
+    # standard error of the mean is ~ 50*sqrt(2)/sqrt(20000) = 0.5
+    check(f"mean shift {mean:.2f} within 2 ticks of 0", abs(mean) < 2)
+    check(f"mean size {mean_size:.1f} within 2 ticks of the spread 50", abs(mean_size - 50) < 2)
+    check(f"share above zero {share_positive:.3f} within 0.02 of 1/2", abs(share_positive - 0.5) < 0.02)
+    check("spread 0: every shift is exactly 0", draw_value_shift(random.Random(1), 0) == 0.0)
+
+
+def test_market_price_is_the_midpoint_or_the_best_price_there_is():
+    check("both sides: the midpoint", market_price(book_with_spread(99, 102), reference=500.0) == 100.5)
+    asks_only = OrderBook()
+    asks_only.submit_limit_order(Side.ASK, 101, 0)
+    check("asks only: the best ask", market_price(asks_only, reference=500.0) == 101.0)
+    bids_only = OrderBook()
+    bids_only.submit_limit_order(Side.BID, 99, 0)
+    check("bids only: the best bid", market_price(bids_only, reference=500.0) == 99.0)
+    check("empty book: the reference", market_price(OrderBook(), reference=500.0) == 500.0)
+
+
+def test_value_trader_buys_when_the_price_is_below_its_value():
+    book = book_with_spread()                                   # midpoint 100
+    trader = ValueTrader(agent_id=7, mu=1.0, shift=3.7)         # value = 100 + 3.7 = 103.7
+    order_id = trader.submit(book, 1, reference=100.0)
+    check("an order was placed", order_id is not None)
+    check("it bought at the best ask, 101 (below its limit of 103)",
+          len(book.trades) == 1 and book.trades[0].price == 101 and book.trades[0].aggressor_side is Side.BID)
+    check("the trade is the trader's", book.trades[0].aggressor_agent_id == 7)
+
+
+def test_value_trader_sells_when_the_price_is_above_its_value():
+    book = book_with_spread()
+    trader = ValueTrader(agent_id=7, mu=1.0, shift=-3.2)        # value = 96.8
+    trader.submit(book, 1, reference=100.0)
+    check("it sold at the best bid, 99 (above its limit of 97)",
+          len(book.trades) == 1 and book.trades[0].price == 99 and book.trades[0].aggressor_side is Side.ASK)
+
+
+def test_value_trader_never_trades_at_a_price_worse_than_its_value():
+    book = OrderBook()
+    book.submit_limit_order(Side.BID, 99, 0)
+    book.submit_limit_order(Side.ASK, 101, 0)
+    book.submit_limit_order(Side.ASK, 104, 0)
+    trader = ValueTrader(agent_id=7, mu=1.0, shift=3.7, size=2)     # value 103.7: will pay up to 103
+    trader.submit(book, 1, reference=100.0)
+    check("it buys the unit at 101 but not the one at 104",
+          [(tr.price, tr.quantity) for tr in book.trades] == [(101, 1)] and book.best_ask() == 104)
+    check("the unit it could not buy rests as a bid at 103 (its value, rounded down)",
+          book.best_bid() == 103 and book.depth_profile(Side.BID)[103] == 1)
+
+    book = book_with_spread()
+    ValueTrader(agent_id=7, mu=1.0, shift=-3.2).submit(book, 1, reference=200.0)    # value 196.8, price 100
+    check("a buyer's limit is rounded down and a seller's up: value 196.8 with the price at 100 buys",
+          book.trades[0].aggressor_side is Side.BID)
+    book = book_with_spread()
+    ValueTrader(agent_id=7, mu=1.0, shift=0.4, size=2).submit(book, 1, reference=95.0)   # value 95.4 < 100: sell
+    check("selling 2 with value 95.4: sells 1 at 99, rests the other at 96 (rounded up), not below its value",
+          [(tr.price, tr.quantity) for tr in book.trades] == [(99, 1)] and book.best_ask() == 96)
+
+
+def test_value_trader_rests_inside_the_spread_when_its_value_does_not_cross():
+    book = book_with_spread(bid=95, ask=105)                    # midpoint 100
+    ValueTrader(agent_id=7, mu=1.0, shift=2.5).submit(book, 1, reference=100.0)     # value 102.5: buy, limit 102
+    check("no trade: 102 is below the best ask", len(book.trades) == 0)
+    check("its order rests at 102 and is the new best bid", book.best_bid() == 102 and book.total_orders() == 3)
+
+
+def test_value_trader_does_nothing_when_the_price_is_at_its_value():
+    book = book_with_spread()
+    check("value = price: no order", ValueTrader(agent_id=7, mu=1.0, shift=0.0).submit(book, 1, reference=100.0) is None)
+    check("the book is unchanged", book.total_orders() == 2 and len(book.trades) == 0)
+
+
+def test_value_trader_supplies_the_missing_side_of_a_one_sided_book():
+    book = OrderBook()
+    book.submit_limit_order(Side.ASK, 101, 0)                   # the bid side is empty: price = 101
+    ValueTrader(agent_id=7, mu=1.0, shift=-20.0).submit(book, 1, reference=140.0)   # value 120 > 101
+    check("it buys from the asks that are there", len(book.trades) == 1 and book.trades[0].price == 101)
+    empty = OrderBook()
+    ValueTrader(agent_id=7, mu=1.0, shift=5.0).submit(empty, 1, reference=100.0)    # price = reference = 100
+    check("into an empty book, a trader above the reference posts a bid at its value", empty.best_bid() == 105)
+
+
+def test_value_trader_acts_at_its_rate_and_only_on_its_turn():
+    book = book_with_spread()
+    rng = random.Random(2)
+    never = ValueTrader(agent_id=7, mu=0.0, shift=5.0)
+    check("mu = 0: never submits", all(never.maybe_submit(book, t, 100.0, rng) is None for t in range(200)))
+    slow = ValueTrader(agent_id=8, mu=1.0, shift=0.4, interval=4, offset=1)     # value 100.4: bids at 100, never trades
+    acted = [t for t in range(12) if slow.maybe_submit(book, t, 100.0, rng) is not None]
+    check("interval 4, offset 1, mu = 1: acts on steps 3, 7, 11 only", acted == [3, 7, 11])
+    n = 10_000
+    sometimes = ValueTrader(agent_id=9, mu=0.3, shift=0.4)
+    hits = sum(sometimes.maybe_submit(book_with_spread(), t, 100.0, rng) is not None for t in range(n))
+    check(f"mu = 0.3: submission rate {hits / n:.3f} within 0.02 of 0.3", abs(hits / n - 0.3) < 0.02)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ Testing matching functionality to the papers results to verify working model.
 '''
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass
 from typing import Optional
@@ -156,3 +157,84 @@ class LiquidityTaker:
 
         result, order_id =  book.submit_market_order(side, timestamp, agent_id=self.agent_id, quantity=self.size)
         return result
+
+
+'''
+The value trader is the first agent that reacts to the market.
+
+It has its own idea of what the asset is worth: a reference price that every value trader shares (the
+simulation passes it in; it is the average of the recent mid-price) plus its own fixed shift. The shift
+is what makes the traders disagree: some put the value a little above the reference, some a little
+below, a few far from it.
+
+When its turn comes it compares its value with the current price:
+    price below its value  -> the asset looks cheap, so it buys
+    price above its value  -> the asset looks dear, so it sells
+It does this with a limit order AT its value, so it never pays more than it thinks the asset is worth
+(or sells for less). If that price crosses the spread the order trades at once, like a market order;
+if not, it rests in the book at the trader's value.
+
+When the price is at the reference, about half of the traders want to buy and half want to sell, so
+their orders balance. After a fall, traders whose value sat just below the old price now find the price
+below their value and switch from selling to buying. That is what pulls the price back.
+'''
+def draw_value_shift(rng: random.Random, spread: float) -> float:
+    """A trader's own shift from the shared reference price, in ticks: plus or minus with equal
+    chance, with a size drawn from an exponential distribution with mean `spread`. So most traders
+    sit close to the reference and a few sit far away. spread = 0 gives every trader a shift of 0."""
+    if spread == 0:
+        return 0.0
+    size = rng.expovariate(1.0 / spread)
+    return size if rng.random() < 0.5 else -size
+
+
+def market_price(book: OrderBook, reference: float) -> float:
+    """The price a value trader compares its value with: the midpoint. If one side of the book is
+    empty there is no midpoint, so the best price that does exist is used, or the reference if the
+    book is completely empty."""
+    best_bid, best_ask = book.best_bid(), book.best_ask()
+    if best_bid is not None and best_ask is not None:
+        return (best_bid + best_ask) / 2.0
+    if best_ask is not None:
+        return float(best_ask)
+    if best_bid is not None:
+        return float(best_bid)
+    return reference
+
+
+@dataclass
+class ValueTrader:
+    agent_id: int
+    mu: float          # probability of submitting an order on its step (the same rate as a taker)
+    shift: float       # its value is the shared reference price plus this many ticks (+ or -)
+    interval: int = 1  # gets a chance to act every interval-th step (see AgentType)
+    size: int = 1      # units per order
+    offset: int = 0    # which of those steps: acts when (timestamp + offset) is a multiple of interval
+
+    def maybe_submit(
+            self, book: OrderBook, timestamp: int, reference: float, rng: Optional[random.Random] = None,
+            ) -> Optional[int]:
+        if not is_turn(timestamp, self.interval, self.offset):
+            return None        # not this agent's step: nothing happens, and no random number is used
+        r = rng or random
+        if r.random() >= self.mu:
+            return None
+        return self.submit(book, timestamp, reference)
+
+    def submit(self, book: OrderBook, timestamp: int, reference: float) -> Optional[int]:
+        '''
+        Compare this trader's value with the current price and place a limit order at the value.
+        Returns the order_id, or None if the price is exactly at its value (nothing to do).
+
+        The limit price is rounded to a whole tick on the safe side: down for a buy, up for a sell,
+        so the trader never trades at a price worse than its value. No random numbers are used.
+        '''
+        value = reference + self.shift
+        price = market_price(book, reference)
+        if value > price:
+            return book.submit_limit_order(Side.BID, math.floor(value), timestamp,
+                                           agent_id=self.agent_id, quantity=self.size)
+        if value < price:
+            return book.submit_limit_order(Side.ASK, math.ceil(value), timestamp,
+                                           agent_id=self.agent_id, quantity=self.size)
+        return None

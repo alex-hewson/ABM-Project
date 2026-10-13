@@ -173,6 +173,25 @@ Agreed with supervisors on 13 October 2026; the details below are assumptions.
 With every agent of the first type the model is exactly the baseline (D23). Eq. 1 and Eq. 2 still
 hold, counted in units.
 
+**D28. Value traders: the first agents that react to the market. [Assumed, Checked]**
+Added because agents that ignore the market cannot make the price recover (`validation.md`,
+sections 8 and 9).
+- All value traders share a reference price: the mean of the mid-price over the last W steps
+  (W = 1000 by default). Until there is any history it is the start price.
+- Each trader's own value is the reference plus a fixed shift. The shift is + or − with equal
+  chance, with a size drawn from an exponential distribution (mean 50 ticks by default). So the
+  traders disagree about the value: most are near the reference, a few are far from it.
+- On its turn a trader compares its value with the midpoint. Price below its value: it buys.
+  Price above: it sells.
+- It uses a limit order at its value, rounded so that it never trades at a worse price than its
+  value. If the order crosses the spread it trades at once; if not, it rests in the book.
+- Value traders take the place of some of the takers and act at the same rate μ, so the number of
+  orders per step is unchanged. Takers and value traders act in one random order within a step.
+- A trader keeps its shift for the whole run.
+
+The defaults (W = 1000, mean shift 50 ticks) are placeholders, not fitted to anything. With no
+value traders the model is exactly the baseline (D23).
+
 ---
 
 ## 5. Still open
@@ -180,8 +199,10 @@ hold, counted in units.
 - **Depth-profile fit (D14):** whether the paper fits each side separately or combined.
 - **Asymmetric flow (D16, D18):** the q_provider variant the paper mentions, and whether mirror vs
   blocked reflection matters.
-- **What "recovery" means for the price.** In the basic model the price does not come back after a
-  shock (`validation.md`, section 8). Either recovery means the book refilling, or something has to
-  be added that pulls the price back.
+- **Value trader settings (D28).** How many there are, the window W and the size of the shifts are
+  not fitted to anything yet. They are to be set from real order book data.
+- **Side effect of value traders.** They tie the price to its own recent average, so it wanders
+  less in normal times. The effect on the Hurst exponent and the return distributions has not
+  been measured.
 - **Which mixes of agent types to compare,** and whether speed and size should also be varied
   separately (e.g. unit orders every 4 steps).

@@ -22,6 +22,13 @@ and one with all three types:
 INTERVAL/SIZE:COUNT sets the two separately, e.g. 4/1:250 for unit orders every 4 steps. Without
 these options every agent is the paper's (1:250).
 
+--value-traders N turns N of the 250 takers into value traders (abm/agents.py, ValueTrader), which
+buy when the price is below their own value and sell when it is above. --value-window sets how many
+steps of past prices their shared reference price averages over, and --value-spread how far apart
+their own values are (mean shift from the reference, in ticks):
+
+    python -m experiments.shock --value-traders 125 --out results/shock_value125.png
+
 Recorded each step and averaged over runs:
     price    mid-price minus its value at the step before the shock
     spread   best ask minus best bid
@@ -76,10 +83,11 @@ def parse_mix(items):
     return mix
 
 
-def describe_mix(mix):
-    """Short text for a mix, e.g. '100 x 1 unit every step, 150 x 4 units every 4 steps'."""
+def describe_mix(mix, n_agents=N_AGENTS):
+    """Short text for a mix, e.g. '100 x 1 unit every step, 150 x 4 units every 4 steps'.
+    n_agents is how many agents there are when no mix was given."""
     if mix is None:
-        mix = {AgentType(): N_AGENTS}
+        mix = {AgentType(): n_agents}
     parts = []
     for agent_type, count in mix.items():
         units = "1 unit" if agent_type.size == 1 else f"{agent_type.size} units"
@@ -90,10 +98,12 @@ def describe_mix(mix):
 
 def run_one(task):
     """One run: returns the window around the shock for each recorded quantity."""
-    size, seed, warmup, after, buy, provider_mix, taker_mix = task
+    size, seed, warmup, after, buy, provider_mix, taker_mix, value = task
+    n_value_traders, value_window, value_spread = value
     shock = Shock(step=warmup, size=size, side=Side.BID if buy else Side.ASK) if size > 0 else None
     r = run_simulation(n_agents=N_AGENTS, n_steps=warmup + after + 1, seed=seed, shock=shock,
                        record_sides=True, keep_trades=False, provider_mix=provider_mix, taker_mix=taker_mix,
+                       n_value_traders=n_value_traders, value_window=value_window, value_spread=value_spread,
                        **PARAMS)
     mid = window(r.mid_price_series, warmup, BEFORE, after)
     return {
@@ -109,7 +119,7 @@ def run_one(task):
 def summarise(means, sizes, buy):
     """Print, for each shock size, what the shock did and how much of it was undone."""
     hit_side = "ask_volume" if buy else "bid_volume"
-    print(f"\n{'size':>5} | {'price: impact':>13} {'end':>7} {'recovered':>9} | "
+    print(f"\n{'size':>5} | {'price: impact':>13} {'end':>7} {'recovered':>9} {'half-life':>9} | "
           f"{'spread: before':>14} {'at shock':>8} {'half-life':>9} | "
           f"{'volume: before':>14} {'at shock':>8} {'half-life':>9} {'90% back':>8}")
     for size in sizes:
@@ -121,7 +131,7 @@ def summarise(means, sizes, buy):
         def steps(x):
             return "never" if x is None else str(x)
         print(f"{size:>5} | {impact(price, BEFORE):>13.1f} {np.mean(price[-TAIL:]):>7.1f} "
-              f"{recovered_fraction(price, BEFORE, TAIL):>9.2f} | "
+              f"{recovered_fraction(price, BEFORE, TAIL):>9.2f} {steps(time_to_recover(price, BEFORE)):>9} | "
               f"{pre_shock_level(spread, BEFORE):>14.1f} {spread[BEFORE]:>8.1f} {steps(time_to_recover(spread, BEFORE)):>9} | "
               f"{pre_shock_level(volume, BEFORE):>14.0f} {volume[BEFORE]:>8.0f} {steps(time_to_recover(volume, BEFORE)):>9} "
               f"{steps(time_to_recover(volume, BEFORE, 0.9)):>8}")
@@ -161,7 +171,8 @@ def plot(means, sizes, config, out):
 
     fig.suptitle(f"Shock test: one market {what} order at step 0, basic model, N$_A$={N_AGENTS}, "
                  f"mean of {config['n_runs']} runs\n"
-                 f"providers: {config['providers']}   |   takers: {config['takers']}", fontsize=11)
+                 f"providers: {config['providers']}   |   takers: {config['takers']}"
+                 + (f"   |   {config['value_traders']}" if config["n_value_traders"] else ""), fontsize=11)
     fig.text(0.995, 0.005, "code version: " + describe(config["git"]), ha="right", va="bottom",
              fontsize=7, color="gray")
     fig.tight_layout()
@@ -183,6 +194,12 @@ def main():
                         help="provider types, e.g. 1:100 2:100 4:50 (default: all 1:250)")
     parser.add_argument("--taker-mix", nargs="+", metavar="K:COUNT", default=None,
                         help="taker types, in the same form (default: all 1:250)")
+    parser.add_argument("--value-traders", type=int, default=0,
+                        help="how many of the 250 takers are value traders (default 0)")
+    parser.add_argument("--value-window", type=int, default=1000,
+                        help="steps of past mid-prices in the value traders' reference price (default 1000)")
+    parser.add_argument("--value-spread", type=float, default=50.0,
+                        help="mean distance of a value trader's own value from the reference, in ticks (default 50)")
     parser.add_argument("--workers", type=int, default=None, help="processes to use (default: all cores)")
     parser.add_argument("--out", type=Path, default=Path("results/shock_test.png"))
     args = parser.parse_args()
@@ -193,19 +210,28 @@ def main():
         provider_mix, taker_mix = parse_mix(args.provider_mix), parse_mix(args.taker_mix)
     except ValueError as error:
         parser.error(str(error))
-    for name, mix in (("--provider-mix", provider_mix), ("--taker-mix", taker_mix)):
-        if mix is not None and sum(mix.values()) != N_AGENTS:
-            parser.error(f"{name}: the counts must add up to {N_AGENTS}, got {sum(mix.values())}")
+    if not (0 <= args.value_traders <= N_AGENTS):
+        parser.error(f"--value-traders must be between 0 and {N_AGENTS}")
+    n_takers = N_AGENTS - args.value_traders        # value traders take the place of takers
+    for name, mix, total in (("--provider-mix", provider_mix, N_AGENTS), ("--taker-mix", taker_mix, n_takers)):
+        if mix is not None and sum(mix.values()) != total:
+            parser.error(f"{name}: the counts must add up to {total}, got {sum(mix.values())}")
+    value = (args.value_traders, args.value_window, args.value_spread)
 
     sizes = sorted(set(args.sizes))
-    tasks = [(size, seed, args.warmup, args.after, args.buy, provider_mix, taker_mix)
+    tasks = [(size, seed, args.warmup, args.after, args.buy, provider_mix, taker_mix, value)
              for size in sizes for seed in range(args.n_runs)]
     config = dict(sizes=sizes, n_runs=args.n_runs, warmup=args.warmup, after=args.after, buy=args.buy,
                   n_agents=N_AGENTS, params=PARAMS, git=git_info(),
-                  providers=describe_mix(provider_mix), takers=describe_mix(taker_mix),
-                  provider_mix=provider_mix, taker_mix=taker_mix)
+                  providers=describe_mix(provider_mix), takers=describe_mix(taker_mix, n_takers),
+                  provider_mix=provider_mix, taker_mix=taker_mix,
+                  n_value_traders=args.value_traders, value_window=args.value_window,
+                  value_spread=args.value_spread,
+                  value_traders=f"{args.value_traders} value traders (window {args.value_window}, "
+                                f"spread {args.value_spread:g})")
     print(f"{len(tasks)} runs: sizes {sizes}, {args.n_runs} runs each, code version {describe(config['git'])}\n"
-          f"providers: {config['providers']}\ntakers:    {config['takers']}", flush=True)
+          f"providers: {config['providers']}\ntakers:    {config['takers']}"
+          + (f"\nplus:      {config['value_traders']}" if args.value_traders else ""), flush=True)
 
     start = time.perf_counter()
     windows = {size: {q: [] for q in QUANTITIES} for size in sizes}
