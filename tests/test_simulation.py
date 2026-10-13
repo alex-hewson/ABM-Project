@@ -301,6 +301,9 @@ def test_recording_the_sides_does_not_change_the_run():
     check("the final counts match the final book, counted side by side",
           sides.n_bids_series[-1] == len(sides.book.resting_order_ids(Side.BID))
           and sides.n_asks_series[-1] == len(sides.book.resting_order_ids(Side.ASK)))
+    check("with unit orders, the units on each side equal the orders on it, every step",
+          np.array_equal(sides.bid_volume_series, sides.n_bids_series)
+          and np.array_equal(sides.ask_volume_series, sides.n_asks_series))
     mids = np.array(sides.mid_price_series, dtype=float)
     check("midpoint = (best bid + best ask) / 2, every step",
           np.array_equal((sides.best_bid_series + sides.best_ask_series) / 2, mids))
@@ -325,6 +328,8 @@ def test_sell_shock_removes_exactly_its_size_from_the_bids():
     check(f"the shock made exactly {size} trades, all sells, all in the shock step",
           len(shock_trades) == size and all(tr.aggressor_side is Side.ASK for tr in shock_trades)
           and len({tr.timestamp for tr in shock_trades}) == 1)
+    check("each of its trades is against a one-unit resting order, so each is for 1 unit",
+          all(tr.quantity == 1 for tr in shock_trades))
     prices = [tr.price for tr in shock_trades]
     check("it worked down through the bids: each trade at the same or a lower price", prices == sorted(prices, reverse=True))
     check("fully filled", hit.shock_unfilled == 0 and plain.shock_unfilled == 0)

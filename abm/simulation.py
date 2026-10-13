@@ -45,8 +45,9 @@ SHOCK_AGENT_ID = -1    # agent_id on the shock's orders, so its trades can be to
 class Shock:
     """One large market order injected into a run, to study how the book recovers afterwards.
 
-    It is made of `size` unit market orders, submitted one after another at the end of step `step`
-    (after that step's takers), so it eats into the book from the best price outwards.
+    It is a single market order of `size` units, submitted at the end of step `step` (after that
+    step's takers). It takes the best price first, then the next, so it eats into the book from the
+    best price outwards.
     side = Side.ASK is a sell (the price falls), Side.BID is a buy (the price rises).
     step counts from 0 = first step after the pre-opening."""
     step: int
@@ -95,7 +96,9 @@ class SimulationResult:
     best_ask_series: np.ndarray = field(default_factory=lambda: np.empty(0))
     n_bids_series: np.ndarray = field(default_factory=lambda: np.empty(0))     # resting buy orders
     n_asks_series: np.ndarray = field(default_factory=lambda: np.empty(0))     # resting sell orders
-    # How many of the shock's unit orders found nothing left to trade against (0 if there was no shock).
+    bid_volume_series: np.ndarray = field(default_factory=lambda: np.empty(0))  # resting units, buy side
+    ask_volume_series: np.ndarray = field(default_factory=lambda: np.empty(0))  # resting units, sell side
+    # How many units of the shock found nothing left to trade against (0 if there was no shock).
     shock_unfilled: int = 0
 
 
@@ -200,9 +203,10 @@ def run_simulation(
     shock injects one large market order (see Shock) at the end of the given step. None (the default)
     leaves the run exactly as it was without this option.
 
-    record_sides=True stores the best bid, best ask and number of resting orders on each side at the
-    end of every step (result.best_bid_series etc.). It uses no random numbers, so it does not change
-    the run.
+    record_sides=True stores the best bid, the best ask, and the number of resting orders and of
+    resting units on each side at the end of every step (result.best_bid_series etc.). Orders and
+    units are the same number while every order is one unit. It uses no random numbers, so it does
+    not change the run.
     """
     if method not in ("fast", "agents"):
         raise ValueError(f"method must be 'fast' or 'agents', got {method!r}")
@@ -293,6 +297,7 @@ def run_simulation(
     n_side = n_steps if record_sides else 0
     best_bid_series, best_ask_series = np.full(n_side, np.nan), np.full(n_side, np.nan)
     n_bids_series, n_asks_series = np.zeros(n_side, dtype=int), np.zeros(n_side, dtype=int)
+    bid_volume_series, ask_volume_series = np.zeros(n_side, dtype=int), np.zeros(n_side, dtype=int)
     shock_unfilled = 0
 
     for t in range(pre_opening_steps, pre_opening_steps + n_steps):
@@ -311,12 +316,10 @@ def run_simulation(
             taker_flow.advance(rng)             # next step's value; step 0 used the starting value
 
         if shock is not None and step == shock.step:
-            # One large market order = shock.size unit orders in a row. It uses no random numbers.
-            for i in range(shock.size):
-                outcome, _ = book.submit_market_order(shock.side, t, agent_id=SHOCK_AGENT_ID)
-                if outcome is OrderResult.NO_MATCH:     # that side of the book is now empty
-                    shock_unfilled = shock.size - i
-                    break
+            # One large market order. It uses no random numbers.
+            traded_before = book.volume_traded
+            book.submit_market_order(shock.side, t, agent_id=SHOCK_AGENT_ID, quantity=shock.size)
+            shock_unfilled = shock.size - (book.volume_traded - traded_before)   # above 0 if that side ran out
 
         mid_price_series.append(book.mid_price())
         total_orders_series.append(book.total_orders())
@@ -326,9 +329,10 @@ def run_simulation(
                 best_bid_series[step] = best_bid
             if best_ask is not None:
                 best_ask_series[step] = best_ask
-            n_bids = sum(map(len, book.bids.values()))
-            n_bids_series[step] = n_bids
-            n_asks_series[step] = book.total_orders() - n_bids     # every resting order is a bid or an ask
+            n_bids_series[step] = book.orders_on(Side.BID)
+            n_asks_series[step] = book.orders_on(Side.ASK)
+            bid_volume_series[step] = book.volume_on(Side.BID)
+            ask_volume_series[step] = book.volume_on(Side.ASK)
 
         if record_trade_prices and step_trade_prices:
             trade_price_steps["first"][step] = step_trade_prices[0]
@@ -355,6 +359,8 @@ def run_simulation(
         best_ask_series=best_ask_series,
         n_bids_series=n_bids_series,
         n_asks_series=n_asks_series,
+        bid_volume_series=bid_volume_series,
+        ask_volume_series=ask_volume_series,
         shock_unfilled=shock_unfilled,
     )
 

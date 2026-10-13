@@ -14,7 +14,8 @@ control with no shock: it shows how much of a curve is noise.
 Recorded each step and averaged over runs:
     price    mid-price minus its value at the step before the shock
     spread   best ask minus best bid
-    orders   number of resting orders on each side of the book
+    volume   number of resting units on each side of the book (= number of orders while every
+             order is one unit)
 
 The figure is saved to --out, and the averaged curves to the same name with .pkl. A summary table
 (impact, share recovered, recovery times; see analysis/recovery.py) is printed.
@@ -42,7 +43,7 @@ from experiments.run import PARAMS
 N_AGENTS = 250
 BEFORE = 200          # steps shown (and averaged for the "before" level) ahead of the shock
 TAIL = 200            # the "end" level is the mean of this many final steps
-QUANTITIES = ("price", "spread", "n_bids", "n_asks")
+QUANTITIES = ("price", "spread", "bid_volume", "ask_volume")
 
 
 def run_one(task):
@@ -56,32 +57,33 @@ def run_one(task):
         "size": size,
         "price": mid - mid[BEFORE - 1],          # change since the step before the shock
         "spread": window(r.best_ask_series - r.best_bid_series, warmup, BEFORE, after),
-        "n_bids": window(r.n_bids_series, warmup, BEFORE, after),
-        "n_asks": window(r.n_asks_series, warmup, BEFORE, after),
+        "bid_volume": window(r.bid_volume_series, warmup, BEFORE, after),
+        "ask_volume": window(r.ask_volume_series, warmup, BEFORE, after),
         "unfilled": r.shock_unfilled,
     }
 
 
 def summarise(means, sizes, buy):
     """Print, for each shock size, what the shock did and how much of it was undone."""
-    hit_side = "n_asks" if buy else "n_bids"
+    hit_side = "ask_volume" if buy else "bid_volume"
     print(f"\n{'size':>5} | {'price: impact':>13} {'end':>7} {'recovered':>9} | "
           f"{'spread: before':>14} {'at shock':>8} {'half-life':>9} | "
-          f"{'orders: before':>14} {'at shock':>8} {'half-life':>9} {'90% back':>8}")
+          f"{'volume: before':>14} {'at shock':>8} {'half-life':>9} {'90% back':>8}")
     for size in sizes:
         m = means[size]
         if size == 0:
             print(f"{size:>5} | {'(control)':>13} {np.mean(m['price'][-TAIL:]):>7.1f}")
             continue
-        price, spread, orders = m["price"], m["spread"], m[hit_side]
+        price, spread, volume = m["price"], m["spread"], m[hit_side]
         def steps(x):
             return "never" if x is None else str(x)
         print(f"{size:>5} | {impact(price, BEFORE):>13.1f} {np.mean(price[-TAIL:]):>7.1f} "
               f"{recovered_fraction(price, BEFORE, TAIL):>9.2f} | "
               f"{pre_shock_level(spread, BEFORE):>14.1f} {spread[BEFORE]:>8.1f} {steps(time_to_recover(spread, BEFORE)):>9} | "
-              f"{pre_shock_level(orders, BEFORE):>14.0f} {orders[BEFORE]:>8.0f} {steps(time_to_recover(orders, BEFORE)):>9} "
-              f"{steps(time_to_recover(orders, BEFORE, 0.9)):>8}")
-    print("\nprice in ticks; 'recovered' = share of the price move undone by the end "
+              f"{pre_shock_level(volume, BEFORE):>14.0f} {volume[BEFORE]:>8.0f} {steps(time_to_recover(volume, BEFORE)):>9} "
+              f"{steps(time_to_recover(volume, BEFORE, 0.9)):>8}")
+    print("\nprice in ticks; volume = resting units on the side the shock hit; "
+          "'recovered' = share of the price move undone by the end "
           "(1 = back to the old price, 0 = none);\nhalf-life and '90% back' in steps after the shock.")
 
 
@@ -90,7 +92,7 @@ def plot(means, sizes, config, out):
     t = np.arange(-BEFORE, after + 1)
     what = "buy" if config["buy"] else "sell"
     fig, axes = plt.subplots(2, 2, figsize=(13, 9))
-    (ax_price, ax_zoom), (ax_spread, ax_orders) = axes
+    (ax_price, ax_zoom), (ax_spread, ax_volume) = axes
 
     for colour, size in enumerate(sizes):
         m, c = means[size], f"C{colour}"
@@ -98,19 +100,19 @@ def plot(means, sizes, config, out):
         ax_price.plot(t, m["price"], color=c, lw=0.9, label=label)
         ax_zoom.plot(t, m["price"], color=c, lw=0.9, label=label)
         ax_spread.plot(t, m["spread"], color=c, lw=0.9, label=label)
-        ax_orders.plot(t, m["n_bids"], color=c, lw=0.9, label=f"{label}: bids")
-        ax_orders.plot(t, m["n_asks"], color=c, lw=0.9, ls="--", label=f"{label}: asks")
+        ax_volume.plot(t, m["bid_volume"], color=c, lw=0.9, label=f"{label}: bids")
+        ax_volume.plot(t, m["ask_volume"], color=c, lw=0.9, ls="--", label=f"{label}: asks")
 
     ax_price.set(title="(a) mid-price change", xlabel="steps since the shock", ylabel="price change [ticks]")
     ax_zoom.set(title="(b) mid-price change, first 300 steps", xlabel="steps since the shock",
                 ylabel="price change [ticks]", xlim=(-30, 300))
     ax_spread.set(title="(c) spread", xlabel="steps since the shock", ylabel="spread [ticks]", xlim=(-30, 300))
-    ax_orders.set(title="(d) resting orders per side (solid: bids, dashed: asks)",
-                  xlabel="steps since the shock", ylabel="orders", xlim=(-30, 300))
+    ax_volume.set(title="(d) resting units per side (solid: bids, dashed: asks)",
+                  xlabel="steps since the shock", ylabel="units", xlim=(-30, 300))
     for ax in (ax_price, ax_zoom, ax_spread):
         ax.axvline(0, color="gray", lw=0.5, ls=":")
         ax.legend(fontsize=8)
-    ax_orders.axvline(0, color="gray", lw=0.5, ls=":")
+    ax_volume.axvline(0, color="gray", lw=0.5, ls=":")
     ax_price.axhline(0, color="gray", lw=0.5, ls=":")
     ax_zoom.axhline(0, color="gray", lw=0.5, ls=":")
 

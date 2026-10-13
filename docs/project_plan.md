@@ -31,6 +31,8 @@ markets", EPL 75, 510.
 - Shock test on the basic model: one large market order, then price, spread and orders per side are
   recorded (D24, D25; `experiments/shock.py`). The book refills, the price does not come back
   (`validation.md`, section 8)
+- Order sizes above one unit in the order book: partial fills, market orders that work through
+  several price levels, cancellation of a whole order (D26)
 
 Code layout and how to run things: see `README.md`.
 
@@ -95,10 +97,9 @@ limits) and needs rewriting.
 
 ## Immediate next steps
 
-1. Order sizes above 1 unit in the order book.
-2. The three agent types, with tests that each trades the same volume on average and that type 1
+1. The three agent types, with tests that each trades the same volume on average and that type 1
    alone reproduces the baseline.
-3. Repeat the shock test with different mixes of the three types.
-4. Decide with supervisors what "recovery" means for the price, since it does not come back in the
+2. Repeat the shock test with different mixes of the three types.
+3. Decide with supervisors what "recovery" means for the price, since it does not come back in the
    basic model.
-5. Rewrite `phase2_plan.md` for the new direction.
+4. Rewrite `phase2_plan.md` for the new direction.

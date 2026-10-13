@@ -129,7 +129,7 @@ Fig. 4b is drawn as in the paper: signed Δp on a linear axis, probability on a 
 
 ## 4. Phase 2: shocks and recovery
 
-**D24. A shock is one market order of a given size, made of unit orders. [Assumed]**
+**D24. A shock is one market order of a given size. [Assumed]**
 It is submitted at the end of a step, after that step's takers, so the price recorded for the step
 shows the full impact. It eats into the book from the best price outwards. It uses no random
 numbers, so a run with a shock is identical to the run without it up to that step.
@@ -142,6 +142,20 @@ numbers, so a run with a shock is identical to the run without it up to that ste
 - Share recovered = how much of the impact is undone by the end (mean of the last 200 steps).
 - Half-life = steps until half of the impact is undone.
 
+**D26. Orders bigger than one unit. [Assumed]**
+The paper only has unit orders (P4), so all of this is added:
+- A limit order of size k rests as one order. It keeps its place in the queue while it is filled
+  bit by bit.
+- It is cancelled as a whole. The cancellation probability δ applies to each order, not each unit.
+- A market order of size k takes the best price first, then the next, until it is filled. If the
+  other side runs out, the unfilled part is dropped.
+- A trade is one fill between two orders, of any size. The trade prices of a step (D11) count each
+  trade once, whatever its size.
+- Depth is counted in units. Orders and units are both recorded, and are equal while every order
+  is one unit.
+
+With every order at size 1 the model is exactly the baseline (D23).
+
 ---
 
 ## 5. Still open
@@ -152,4 +166,5 @@ numbers, so a run with a shock is identical to the run without it up to that ste
 - **What "recovery" means for the price.** In the basic model the price does not come back after a
   shock (`validation.md`, section 8). Either recovery means the book refilling, or something has to
   be added that pulls the price back.
-- **Agents with different speeds and order sizes.** Not built yet.
+- **Agents with different speeds and order sizes.** The order book handles sizes (D26); the agents
+  are not built yet.

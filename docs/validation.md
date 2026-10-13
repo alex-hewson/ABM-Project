@@ -148,6 +148,11 @@ Since the Fig. 4 run the model has not changed. The buy-probability classes were
 small edits (an added check in `orderbook.py`, and passing `rng` on in `agents.py`) do not change
 behaviour. All 108 tests pass.
 
+**Order sizes (D26).** Adding order sizes to the order book left the baseline unchanged: the test
+for D23 still gives the same numbers, and a shock run gives the same result as before. A plain run
+is about 8% slower (0.22 to 0.24 ms per step, N_A = 250), because every order now carries and checks
+a size.
+
 **Environment (D9).** Python 3.14.6, numpy 2.5.0, matplotlib 3.11.0 on an Intel i5-8365U laptop
 (4 cores / 8 threads).
 

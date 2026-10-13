@@ -25,15 +25,21 @@ class Side(Enum):
 class OrderResult(Enum):
     '''
     Outcome of attempted match (for either market order or limit order)
-    EXECUTED means a trade happened (obvs!)
+    EXECUTED means a trade happened (obvs!), and the whole order was filled
     NO_MATCH means for limit order, there is no crossing, so just rests in the book
              for a market order means there is no liquidity (not good!)
     '''
     EXECUTED = 1
     NO_MATCH = 2
+    # Only possible for orders bigger than one unit: part of the order traded and part did not.
+    # A market order that used up the whole opposite side, or a limit order whose remainder now rests.
+    PARTIAL = 3
 
 
-@dataclass
+# slots=True stores each order compactly (no per-order dict), and eq=False makes two orders "equal" only
+# if they are the very same object. Both make the book faster, and neither changes what it does: order
+# ids are unique, so two different orders were never equal anyway.
+@dataclass(slots=True, eq=False)
 class Order:
     """A single resting limit order. Market orders don't need to be
     represented as objects since they execute immediately and never rest."""
@@ -42,6 +48,7 @@ class Order:
     price: int          # price tick
     timestamp: int       # simulation step at which it was submitted
     agent_id: Optional[int] = None
+    quantity: int = 1    # units still unfilled. Goes down as the order is partly filled; 1 in the base model
 
 
 @dataclass
@@ -53,13 +60,14 @@ class Trade:
     resting_order_id: int
     resting_agent_id: Optional[int]
     aggressor_agent_id: Optional[int]
+    quantity: int = 1       # units that changed hands in this trade
 
 @dataclass
 class MatchResult:
     """Records the outcome of an incoming order, importantly the amount of unfilled remainder that needs to rest in the book (for limit orders)
     In a limit order that doesn't cross the spread, remainder is the whole order."""
     result: OrderResult
-    has_remainder: bool
+    remaining: int       # units of the incoming order that did not trade (0 if it was filled completely)
 
 class OrderBook:
     """
@@ -95,8 +103,17 @@ class OrderBook:
         self._resting_pos: Dict[int, int] = {}
         self._id_counter = itertools.count(1)
 
+        # Running totals for each side, kept up to date on every order so they never need recounting:
+        # the number of resting orders, and their total size in units. The two are equal while every
+        # order is one unit.
+        self._bid_orders = 0
+        self._ask_orders = 0
+        self._bid_volume = 0
+        self._ask_volume = 0
+
         self.trades: List[Trade] = []
-        self.n_trades = 0
+        self.n_trades = 0            # number of trades, whatever their size
+        self.volume_traded = 0       # units traded (equal to n_trades while every order is one unit)
         self._keep_trades = keep_trades
         self._on_trade = on_trade
 
@@ -147,27 +164,41 @@ class OrderBook:
     # ------------------------------------------------------------------ #
 
     def depth_at(self, side: Side, price: int) -> int:
-        """Number of resting orders at a given price level on one side.
-        
+        """Number of resting units at a given price level on one side (the sizes of the orders there, added up).
+
         Currently not used, but is faster than depth_profile() if only one level is needed. (Perhaps for an advanced liquidity taker that wants to see depth before ordering.)"""
         book = self.bids if side is Side.BID else self.asks
-        return len(book.get(price, ()))
+        return sum(o.quantity for o in book.get(price, ()))
 
     def depth_profile(self, side: Side) -> Dict[int, int]:
-        """Number of resting orders at each occupied price level on one side.
+        """Number of resting units at each occupied price level on one side.
         Essentially just depth_at() for all levels, as a dict."""
         book = self.bids if side is Side.BID else self.asks
-        return {p: len(q) for p, q in book.items() if q}
+        return {p: sum(o.quantity for o in q) for p, q in book.items() if q}
 
     def total_orders(self) -> int:
+        """Number of resting orders, whatever their size. This is what cancellation works on: an order
+        is cancelled as a whole."""
         return len(self._order_lookup)
+
+    def total_volume(self) -> int:
+        """Number of resting units: the sizes of all resting orders added up."""
+        return self._bid_volume + self._ask_volume
+
+    def orders_on(self, side: Side) -> int:
+        """Number of resting orders on one side."""
+        return self._bid_orders if side is Side.BID else self._ask_orders
+
+    def volume_on(self, side: Side) -> int:
+        """Number of resting units on one side."""
+        return self._bid_volume if side is Side.BID else self._ask_volume
 
     # ------------------------------------------------------------------ #
     # Submitting orders
     # ------------------------------------------------------------------ #
 
     def submit_limit_order(
-        self, side: Side, price: int, timestamp: int, agent_id: Optional[int] = None
+        self, side: Side, price: int, timestamp: int, agent_id: Optional[int] = None, quantity: int = 1
     ) -> int:
         """
         Submit a limit order. If it crosses the spread (marketable limit
@@ -175,18 +206,24 @@ class OrderBook:
         paper's model. Any unexecuted remainder rests in the book.
         Returns the order_id (useful for later cancellation, even if the
         order fully executed and the id is now just a historical reference).
+
+        quantity is the size of the order in units (1 in the base model). A bigger order rests as ONE
+        order with that size: it keeps its place in the queue while it is filled bit by bit, and
+        cancel_order removes whatever is left of it in one go.
         """
+        if quantity < 1:
+            raise ValueError("quantity must be at least 1")
         order_id = self.next_order_id()
         match = self._match_incoming(
             side=side, price=price, timestamp=timestamp,
-            agent_id=agent_id, order_id=order_id, is_market_order=False,
+            agent_id=agent_id, order_id=order_id, is_market_order=False, quantity=quantity,
         )
-        if match.has_remainder:
-            self._rest_order(Order(order_id, side, price, timestamp, agent_id))
+        if match.remaining > 0:
+            self._rest_order(Order(order_id, side, price, timestamp, agent_id, quantity=match.remaining))
         return order_id
 
     def submit_market_order(
-        self, side: Side, timestamp: int, agent_id: Optional[int] = None
+        self, side: Side, timestamp: int, agent_id: Optional[int] = None, quantity: int = 1
     ) -> tuple[OrderResult, int]:
         """
         Submit a market order. Executes immediately against the best
@@ -195,12 +232,17 @@ class OrderBook:
 
         Returns (OrderResult, order_id). order_id is still returned on failure (more data).
 
-        Since all orders are unit size in this base model, there is no need to check for remainder.
+        quantity is the size of the order in units (1 in the base model). A bigger order takes the best
+        price first, then the next best, and so on until it is filled. If the opposite side runs out
+        first, the result is PARTIAL (or NO_MATCH if nothing traded at all) and the unfilled part is
+        dropped: a market order never rests. volume_traded shows how many units did trade.
         """
+        if quantity < 1:
+            raise ValueError("quantity must be at least 1")
         order_id = self.next_order_id()
         match = self._match_incoming(
             side=side, price=None, timestamp=timestamp,
-            agent_id=agent_id, order_id=order_id, is_market_order=True,
+            agent_id=agent_id, order_id=order_id, is_market_order=True, quantity=quantity,
         )
         return match.result, order_id
 
@@ -215,6 +257,12 @@ class OrderBook:
         self._order_lookup[order.order_id] = order    #Puts the order in the order_id -> Order dict
         self._resting_pos[order.order_id] = len(self._resting_ids) #Finds the position of the order in the resting_ids list (it will be the next entry in the list after it is appended to it, so its index will be the length before its added). Adds this position to the resting_pos dict.
         self._resting_ids.append(order.order_id) #Appends the id to the resting_ids list
+        if order.side is Side.BID:
+            self._bid_orders += 1
+            self._bid_volume += order.quantity
+        else:
+            self._ask_orders += 1
+            self._ask_volume += order.quantity
 
         # A price only needs a heap entry when its level is created; pushing one per order
         # (an earlier grew the heaps without bound.)
@@ -241,6 +289,14 @@ class OrderBook:
         if last_id != order_id:              # move the last id into the freed slot
             self._resting_ids[pos] = last_id
             self._resting_pos[last_id] = pos
+        # order.quantity is whatever was still unfilled: 0 if it traded completely (its units were
+        # already taken off the volume trade by trade), all that was left of it if it was cancelled.
+        if order.side is Side.BID:
+            self._bid_orders -= 1
+            self._bid_volume -= order.quantity
+        else:
+            self._ask_orders -= 1
+            self._ask_volume -= order.quantity
         return order
 
     # ------------------------------------------------------------------ #
@@ -255,27 +311,30 @@ class OrderBook:
         agent_id: Optional[int],
         order_id: int,
         is_market_order: bool,
+        quantity: int = 1,
     ) -> "MatchResult":
         """
         Attempt to match an incoming order (market or marketable limit)
         against the opposite side of the book, walking through price
         levels if necessary (this is where price impact / slippage for
-        larger orders would show up, though this base model uses unit
-        order size so at most one resting order is consumed).
+        larger orders shows up: an order of one unit consumes at most one
+        resting unit, a bigger order can work through several orders and levels).
 
         Returns MatchResult with:
-            result: OrderResult.EXECUTED if a trade happened
-                    OrderResult.NO_MATCH otherwise
-            has_remainder: True if there is any unmatched quantity that needs to rest in the orderbook (only limit orders)
+            result: OrderResult.EXECUTED if the whole order traded
+                    OrderResult.PARTIAL if only part of it traded
+                    OrderResult.NO_MATCH if none of it traded
+            remaining: units that did not trade. For a limit order these rest in the orderbook; for a market order they are dropped.
         """
         opposite_book = self.asks if side is Side.BID else self.bids
+        remaining = quantity
 
-        while True:
+        while remaining > 0:
             best_opposite = self.best_ask() if side is Side.BID else self.best_bid()
             if best_opposite is None:
-                # opposite side of book is empty -- market order can't fill,
-                # limit order has nothing to match against
-                return MatchResult(OrderResult.NO_MATCH, has_remainder= not is_market_order)   #Has remainder is false for market orders (is a market order so has_remainder = not True)
+                # opposite side of book is empty -- market order can't fill (any further),
+                # limit order has nothing (more) to match against
+                break
 
             if is_market_order:
                 crosses = True  #Market order always crosses the spread, since it just executes at the best available price
@@ -284,33 +343,49 @@ class OrderBook:
                 crosses = (price >= best_opposite) if side is Side.BID else (price <= best_opposite) #Checks if limit order crosses the spread, True if it does, False if it doesn't.
 
             if not crosses:
-                return MatchResult(OrderResult.NO_MATCH, has_remainder=True)  # unmatched remainder rests in book, so has_remainder = True, (market orders don't rest, but will have remainder, they shouldn't have remainder though as then no liquidity)
+                break  # the unmatched remainder of a limit order rests in the book
 
             queue = opposite_book[best_opposite]
             resting_order = queue[0]  # time priority: oldest order at this price
 
+            # Trade as much as both orders allow: the whole resting order, or only part of it if the
+            # incoming order is smaller. With unit orders this is always exactly 1.
+            traded = min(remaining, resting_order.quantity)
             self._execute_trade(
                 timestamp=timestamp,
                 price=best_opposite,
                 aggressor_side=side,
                 resting_order=resting_order,
                 aggressor_agent_id=agent_id,
+                quantity=traded,
             )
+            remaining -= traded
+            resting_order.quantity -= traded
+            if side is Side.BID:          # a buy takes units off the ask side, a sell off the bid side
+                self._ask_volume -= traded
+            else:
+                self._bid_volume -= traded
 
-            queue.popleft()
-            if not queue:
-                del opposite_book[best_opposite]
-            self._forget(resting_order.order_id)     #If the level is now empty (popped the last entry), delete the level from the book and forget the order id from the resting order list.
+            if resting_order.quantity == 0:
+                # Resting order completely filled: take it out of the queue. A partly filled one stays
+                # at the front, so it keeps its time priority.
+                queue.popleft()
+                if not queue:
+                    del opposite_book[best_opposite]
+                self._forget(resting_order.order_id)     #If the level is now empty (popped the last entry), delete the level from the book and forget the order id from the resting order list.
 
-            # Unit order size in this base model: incoming order is now
-            # fully filled after consuming exactly one resting order.
-            return MatchResult(OrderResult.EXECUTED, has_remainder=False)
+        if remaining == 0:
+            return MatchResult(OrderResult.EXECUTED, remaining=0)
+        if remaining == quantity:
+            return MatchResult(OrderResult.NO_MATCH, remaining=remaining)
+        return MatchResult(OrderResult.PARTIAL, remaining=remaining)
 
     def _execute_trade(
         self, timestamp: int, price: int, aggressor_side: Side,
-        resting_order: Order, aggressor_agent_id: Optional[int],
+        resting_order: Order, aggressor_agent_id: Optional[int], quantity: int = 1,
     ) -> None:
         self.n_trades += 1
+        self.volume_traded += quantity
         if self._on_trade is not None:
             self._on_trade(price)
         if self._keep_trades:
@@ -321,6 +396,7 @@ class OrderBook:
                 resting_order_id=resting_order.order_id,
                 resting_agent_id=resting_order.agent_id,
                 aggressor_agent_id=aggressor_agent_id,
+                quantity=quantity,
             ))
 
     # ------------------------------------------------------------------ #

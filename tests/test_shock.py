@@ -33,13 +33,13 @@ def test_same_seed_is_identical_until_the_shock():
     buy = run_one((40, 3, WARMUP, AFTER, True))
     check("before the shock, the control and the shocked run agree on every quantity",
           all(np.array_equal(control[q][:BEFORE], sell[q][:BEFORE]) for q in QUANTITIES))
-    check("the sell order takes 40 orders off the bid side at the shock step",
-          control["n_bids"][BEFORE] - sell["n_bids"][BEFORE] == 40
-          and control["n_asks"][BEFORE] == sell["n_asks"][BEFORE])
+    check("the sell order takes 40 units off the bid side at the shock step",
+          control["bid_volume"][BEFORE] - sell["bid_volume"][BEFORE] == 40
+          and control["ask_volume"][BEFORE] == sell["ask_volume"][BEFORE])
     check("and the price falls", sell["price"][BEFORE] < control["price"][BEFORE])
-    check("the buy order takes 40 orders off the ask side instead",
-          control["n_asks"][BEFORE] - buy["n_asks"][BEFORE] == 40
-          and control["n_bids"][BEFORE] == buy["n_bids"][BEFORE])
+    check("the buy order takes 40 units off the ask side instead",
+          control["ask_volume"][BEFORE] - buy["ask_volume"][BEFORE] == 40
+          and control["bid_volume"][BEFORE] == buy["bid_volume"][BEFORE])
     check("and the price rises", buy["price"][BEFORE] > control["price"][BEFORE])
     check("a shock this small is fully filled", sell["unfilled"] == 0 and buy["unfilled"] == 0)
 
