@@ -11,6 +11,17 @@ shock option), and the run goes on for --after steps. --buy injects a buy order 
 For every size the same seeds are used, so the runs are identical up to the shock. Size 0 is the
 control with no shock: it shows how much of a curve is noise.
 
+--provider-mix and --taker-mix give the agents different speeds and order sizes (abm/agents.py,
+AgentType). Each item is K:COUNT, meaning COUNT agents that get a chance to act every K steps and
+place orders of K units. The counts must add up to 250. For example, a market of 4-step providers,
+and one with all three types:
+
+    python -m experiments.shock --provider-mix 4:250 --out results/shock_providers4.png
+    python -m experiments.shock --provider-mix 1:100 2:100 4:50 --out results/shock_mixed.png
+
+INTERVAL/SIZE:COUNT sets the two separately, e.g. 4/1:250 for unit orders every 4 steps. Without
+these options every agent is the paper's (1:250).
+
 Recorded each step and averaged over runs:
     price    mid-price minus its value at the step before the shock
     spread   best ask minus best bid
@@ -34,6 +45,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+from abm.agents import AgentType
 from abm.orderbook import Side
 from abm.simulation import run_simulation, Shock
 from analysis.recovery import window, mean_response, pre_shock_level, impact, recovered_fraction, time_to_recover
@@ -46,12 +58,43 @@ TAIL = 200            # the "end" level is the mean of this many final steps
 QUANTITIES = ("price", "spread", "bid_volume", "ask_volume")
 
 
+def parse_mix(items):
+    """['1:100', '4:150'] -> {AgentType(1, 1): 100, AgentType(4, 4): 150}. K:COUNT gives agents that
+    act every K steps with orders of K units; INTERVAL/SIZE:COUNT sets the two separately.
+    None (option not given) stays None, which run_simulation reads as the paper's population."""
+    if items is None:
+        return None
+    mix = {}
+    for item in items:
+        try:
+            kind, count = item.split(":")
+            interval, size = kind.split("/") if "/" in kind else (kind, kind)
+            agent_type = AgentType(int(interval), int(size))
+            mix[agent_type] = mix.get(agent_type, 0) + int(count)
+        except ValueError as error:
+            raise ValueError(f"cannot read mix item {item!r}: expected K:COUNT or INTERVAL/SIZE:COUNT") from error
+    return mix
+
+
+def describe_mix(mix):
+    """Short text for a mix, e.g. '100 x 1 unit every step, 150 x 4 units every 4 steps'."""
+    if mix is None:
+        mix = {AgentType(): N_AGENTS}
+    parts = []
+    for agent_type, count in mix.items():
+        units = "1 unit" if agent_type.size == 1 else f"{agent_type.size} units"
+        every = "every step" if agent_type.interval == 1 else f"every {agent_type.interval} steps"
+        parts.append(f"{count} x {units} {every}")
+    return ", ".join(parts)
+
+
 def run_one(task):
     """One run: returns the window around the shock for each recorded quantity."""
-    size, seed, warmup, after, buy = task
+    size, seed, warmup, after, buy, provider_mix, taker_mix = task
     shock = Shock(step=warmup, size=size, side=Side.BID if buy else Side.ASK) if size > 0 else None
     r = run_simulation(n_agents=N_AGENTS, n_steps=warmup + after + 1, seed=seed, shock=shock,
-                       record_sides=True, keep_trades=False, **PARAMS)
+                       record_sides=True, keep_trades=False, provider_mix=provider_mix, taker_mix=taker_mix,
+                       **PARAMS)
     mid = window(r.mid_price_series, warmup, BEFORE, after)
     return {
         "size": size,
@@ -117,7 +160,8 @@ def plot(means, sizes, config, out):
     ax_zoom.axhline(0, color="gray", lw=0.5, ls=":")
 
     fig.suptitle(f"Shock test: one market {what} order at step 0, basic model, N$_A$={N_AGENTS}, "
-                 f"mean of {config['n_runs']} runs")
+                 f"mean of {config['n_runs']} runs\n"
+                 f"providers: {config['providers']}   |   takers: {config['takers']}", fontsize=11)
     fig.text(0.995, 0.005, "code version: " + describe(config["git"]), ha="right", va="bottom",
              fontsize=7, color="gray")
     fig.tight_layout()
@@ -135,18 +179,33 @@ def main():
     parser.add_argument("--warmup", type=int, default=2000, help="steps before the shock")
     parser.add_argument("--after", type=int, default=2000, help="steps after the shock")
     parser.add_argument("--buy", action="store_true", help="inject a buy order instead of a sell order")
+    parser.add_argument("--provider-mix", nargs="+", metavar="K:COUNT", default=None,
+                        help="provider types, e.g. 1:100 2:100 4:50 (default: all 1:250)")
+    parser.add_argument("--taker-mix", nargs="+", metavar="K:COUNT", default=None,
+                        help="taker types, in the same form (default: all 1:250)")
     parser.add_argument("--workers", type=int, default=None, help="processes to use (default: all cores)")
     parser.add_argument("--out", type=Path, default=Path("results/shock_test.png"))
     args = parser.parse_args()
     if args.warmup < BEFORE or args.after < TAIL:
         parser.error(f"--warmup must be at least {BEFORE} and --after at least {TAIL}")
 
+    try:
+        provider_mix, taker_mix = parse_mix(args.provider_mix), parse_mix(args.taker_mix)
+    except ValueError as error:
+        parser.error(str(error))
+    for name, mix in (("--provider-mix", provider_mix), ("--taker-mix", taker_mix)):
+        if mix is not None and sum(mix.values()) != N_AGENTS:
+            parser.error(f"{name}: the counts must add up to {N_AGENTS}, got {sum(mix.values())}")
+
     sizes = sorted(set(args.sizes))
-    tasks = [(size, seed, args.warmup, args.after, args.buy) for size in sizes for seed in range(args.n_runs)]
+    tasks = [(size, seed, args.warmup, args.after, args.buy, provider_mix, taker_mix)
+             for size in sizes for seed in range(args.n_runs)]
     config = dict(sizes=sizes, n_runs=args.n_runs, warmup=args.warmup, after=args.after, buy=args.buy,
-                  n_agents=N_AGENTS, params=PARAMS, git=git_info())
-    print(f"{len(tasks)} runs: sizes {sizes}, {args.n_runs} runs each, code version {describe(config['git'])}",
-          flush=True)
+                  n_agents=N_AGENTS, params=PARAMS, git=git_info(),
+                  providers=describe_mix(provider_mix), takers=describe_mix(taker_mix),
+                  provider_mix=provider_mix, taker_mix=taker_mix)
+    print(f"{len(tasks)} runs: sizes {sizes}, {args.n_runs} runs each, code version {describe(config['git'])}\n"
+          f"providers: {config['providers']}\ntakers:    {config['takers']}", flush=True)
 
     start = time.perf_counter()
     windows = {size: {q: [] for q in QUANTITIES} for size in sizes}

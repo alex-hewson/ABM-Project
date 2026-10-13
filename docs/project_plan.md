@@ -33,6 +33,9 @@ markets", EPL 75, 510.
   (`validation.md`, section 8)
 - Order sizes above one unit in the order book: partial fills, market orders that work through
   several price levels, cancellation of a whole order (D26)
+- Agent types with different speeds and order sizes, for providers and takers, in any mix (D27).
+  Each type trades the same volume, and the first type alone is exactly the baseline
+  (`validation.md`, section 1)
 
 Code layout and how to run things: see `README.md`.
 
@@ -97,9 +100,9 @@ limits) and needs rewriting.
 
 ## Immediate next steps
 
-1. The three agent types, with tests that each trades the same volume on average and that type 1
-   alone reproduces the baseline.
-2. Repeat the shock test with different mixes of the three types.
-3. Decide with supervisors what "recovery" means for the price, since it does not come back in the
+1. Look for what the agent types do change, since the average recovery is the same for every
+   provider mix tried (`validation.md`, section 9): the spread of single runs, taker types, and
+   speed and size varied separately.
+2. Decide with supervisors what "recovery" means for the price, since it does not come back in the
    basic model.
-4. Rewrite `phase2_plan.md` for the new direction.
+3. Rewrite `phase2_plan.md` for the new direction.

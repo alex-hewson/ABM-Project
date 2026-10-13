@@ -10,7 +10,7 @@ side probabilities q_provider / q_taker decide bid vs ask / buy vs sell.
 import random
 
 from abm.orderbook import OrderBook, Side, OrderResult
-from abm.agents import LiquidityProvider, LiquidityTaker
+from abm.agents import LiquidityProvider, LiquidityTaker, AgentType, is_turn
 
 
 def check(label, condition):
@@ -209,6 +209,68 @@ def test_taker_uses_an_overriding_q_when_given():
     check("agent q=0 but override q=1: buys", one_market_order(0.0, 1.0) is Side.BID)
     check("agent q=1 but override q=0: sells", one_market_order(1.0, 0.0) is Side.ASK)
     check("no override: the agent's own q is used", one_market_order(1.0, None) is Side.BID)
+
+def raises_value_error(fn, *args, **kwargs):
+    try:
+        fn(*args, **kwargs)
+    except ValueError:
+        return True
+    return False
+
+
+def test_agent_type_defaults_to_the_papers_agent_and_is_validated():
+    check("default: a chance every step, one unit per order", AgentType() == AgentType(interval=1, size=1))
+    check("interval 0 rejected", raises_value_error(AgentType, interval=0))
+    check("size 0 rejected", raises_value_error(AgentType, size=0))
+
+
+def test_is_turn_hand_worked():
+    check("interval 1: every step", all(is_turn(t, 1, 0) for t in range(10)))
+    check("interval 4, offset 0: steps 0, 4, 8", [t for t in range(10) if is_turn(t, 4, 0)] == [0, 4, 8])
+    check("interval 4, offset 1: steps 3, 7", [t for t in range(10) if is_turn(t, 4, 1)] == [3, 7])
+    check("interval 2, offset 1: the odd steps", [t for t in range(6) if is_turn(t, 2, 1)] == [1, 3, 5])
+
+
+def test_slow_provider_only_acts_on_its_own_steps_with_its_own_size():
+    book = OrderBook()
+    p = LiquidityProvider(agent_id=0, alpha=1.0, q_provider=1.0, lambda_=100, interval=4, size=4, offset=1)
+    rng = random.Random(0)
+    submitted_at = [t for t in range(16) if p.maybe_submit(book, t, P0, rng) is not None]
+    check("alpha=1, interval 4, offset 1: submits on steps 3, 7, 11, 15 only", submitted_at == [3, 7, 11, 15])
+    check("four orders rest", book.total_orders() == 4)
+    check("each of 4 units: 16 units in total", book.total_volume() == 16
+          and all(o.quantity == 4 for queue in book.bids.values() for o in queue))
+
+
+def test_a_step_that_is_not_the_agents_turn_uses_no_random_numbers():
+    book = OrderBook()
+    book.submit_limit_order(Side.BID, 100, 0)
+    book.submit_limit_order(Side.ASK, 105, 0)
+    rng = random.Random(1)
+    before = rng.getstate()
+    p = LiquidityProvider(agent_id=0, alpha=1.0, q_provider=0.5, lambda_=100, interval=4, size=4)
+    t = LiquidityTaker(agent_id=1, mu=1.0, q_taker=0.5, interval=4, size=4)
+    results = [p.maybe_submit(book, 1, P0, rng), t.maybe_submit(book, 2, rng), t.maybe_submit(book, 3, rng)]
+    check("nothing is submitted off-turn", results == [None, None, None] and book.total_orders() == 2)
+    check("and the random stream is untouched", rng.getstate() == before)
+
+
+def test_sized_taker_takes_its_size_from_the_book():
+    book = OrderBook()
+    book.submit_limit_order(Side.ASK, 101, 0, quantity=2)
+    book.submit_limit_order(Side.ASK, 102, 0, quantity=5)
+    taker = LiquidityTaker(agent_id=1, mu=1.0, q_taker=1.0, interval=4, size=4)
+    result = taker.maybe_submit(book, 4, random.Random(0))
+    check("its turn (step 4): the order is filled", result is OrderResult.EXECUTED)
+    check("4 units taken: 2 at 101, then 2 at 102", [(tr.price, tr.quantity) for tr in book.trades] == [(101, 2), (102, 2)])
+    check("3 units are left at 102", book.depth_profile(Side.ASK) == {102: 3})
+
+
+def test_sized_taker_reports_a_partial_fill():
+    book = OrderBook()
+    book.submit_limit_order(Side.ASK, 101, 0, quantity=3)
+    taker = LiquidityTaker(agent_id=1, mu=1.0, q_taker=1.0, size=4)
+    check("only 3 of its 4 units could trade: PARTIAL", taker.submit(book, 0, random.Random(0)) is OrderResult.PARTIAL)
 
 
 if __name__ == "__main__":

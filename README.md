@@ -47,7 +47,7 @@ lines). The tail widths match the paper's Fig. 4b to within reading error: for e
 
 | Folder | Contents |
 |---|---|
-| `abm/` | The model: `orderbook.py` (matching engine), `agents.py` (liquidity providers / takers), `buy_probability.py` (how the takers' buy probability changes over time, Figs. 3 and 4), `simulation.py` (step loop, runs agents through orderbook) |
+| `abm/` | The model: `orderbook.py` (matching engine), `agents.py` (liquidity providers / takers, and agent types with different speeds and order sizes), `buy_probability.py` (how the takers' buy probability changes over time, Figs. 3 and 4), `simulation.py` (step loop, runs agents through orderbook) |
 | `analysis/` | Measurements on one simulation's output: `prices.py` (price series), `hurst.py` (Hurst exponent), `returns.py` (return distributions), `depth_profile.py` (depth profile + lognormal fit), `recovery.py` (how far a shock moves the book and how much is undone) |
 | `experiments/` | Reproducing the paper's figures: `run.py` (runs many simulations and saves the results), `plot.py` (draws Fig. 2, 3 or 4 from saved results); `checkpoint.py` and `provenance.py` are support code these two use, not called directly. `shock.py` is the shock test: one large market order, then the book is watched as it refills |
 | `tests/` | One test file per file above |
@@ -154,6 +154,15 @@ python -m experiments.shock --sizes 0 50 150 300 --n-runs 400 --out results/shoc
 
 `--buy` injects a buy order instead. A summary table is printed, and the averaged curves are saved
 next to the figure as a `.pkl` file.
+
+`--provider-mix` and `--taker-mix` give the agents different speeds and order sizes. Each item is
+`K:COUNT`: that many agents which get a chance to act every K steps and place orders of K units, so
+every type trades the same volume on average. The counts must add up to 250:
+
+```
+python -m experiments.shock --provider-mix 4:250 --out results/shock_providers4.png
+python -m experiments.shock --provider-mix 1:100 2:100 4:50 --out results/shock_mixed.png
+```
 
 ## Requirements
 

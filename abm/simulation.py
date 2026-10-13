@@ -27,14 +27,15 @@ only see the book after cancellation.
 
 from __future__ import annotations
 
+import itertools
 import random
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Mapping, Optional
 
 import numpy as np
 
 from abm.orderbook import OrderBook, Side, OrderResult
-from abm.agents import LiquidityProvider, LiquidityTaker
+from abm.agents import LiquidityProvider, LiquidityTaker, AgentType
 from abm.buy_probability import SideProbability
 
 
@@ -137,6 +138,31 @@ def check_stability_condition(alpha: float, mu: float, delta: float) -> None:
         raise ValueError("delta must be > 0 for a stable order book (Eq. 3).")
 
 
+def _check_mix(mix: Optional[Mapping[AgentType, int]], n_agents: int, name: str) -> Dict[AgentType, int]:
+    """The mix to use: {agent type: number of agents}. None means the paper's population, every
+    agent acting every step with unit orders."""
+    if mix is None:
+        return {AgentType(): n_agents}
+    if any(count < 0 for count in mix.values()):
+        raise ValueError(f"{name}: the number of agents of a type cannot be negative")
+    if sum(mix.values()) != n_agents:
+        raise ValueError(f"{name}: the numbers of agents must add up to n_agents = {n_agents}, "
+                         f"got {sum(mix.values())}")
+    return {agent_type: count for agent_type, count in mix.items() if count > 0}
+
+
+def _turn_lists(agents) -> List[List[List[int]]]:
+    """For the fast method: which agents get their chance on which steps.
+
+    One entry per agent type. Each entry is a list of `interval` lists of agent indices: entry[r]
+    holds the agents of that type whose turn comes on the steps t with t % interval == r."""
+    by_type: Dict[tuple, List[List[int]]] = {}
+    for index, agent in enumerate(agents):
+        lists = by_type.setdefault((agent.interval, agent.size), [[] for _ in range(agent.interval)])
+        lists[-agent.offset % agent.interval].append(index)    # (t + offset) % interval == 0
+    return list(by_type.values())
+
+
 def run_simulation(
     n_agents: int,
     alpha: float,
@@ -159,6 +185,8 @@ def run_simulation(
     q_rms: Optional[float] = None,
     shock: Optional[Shock] = None,
     record_sides: bool = False,
+    provider_mix: Optional[Mapping[AgentType, int]] = None,
+    taker_mix: Optional[Mapping[AgentType, int]] = None,
 ) -> SimulationResult:
     """
     Run the base Preis et al. model for n_steps, after a pre-opening
@@ -207,6 +235,13 @@ def run_simulation(
     resting units on each side at the end of every step (result.best_bid_series etc.). Orders and
     units are the same number while every order is one unit. It uses no random numbers, so it does
     not change the run.
+
+    provider_mix and taker_mix give agents different speeds and order sizes (see AgentType). Each is
+    {agent type: number of agents} and must add up to n_agents, e.g.
+        {AgentType(1, 1): 100, AgentType(2, 2): 100, AgentType(4, 4): 50}.
+    None (the default) is the paper's population. Agents of a slower type are spread evenly over the
+    steps: the i-th agent of a type has offset i % interval, so about the same number get their
+    chance on every step. On its step an agent still acts with probability alpha (or mu), as before.
     """
     if method not in ("fast", "agents"):
         raise ValueError(f"method must be 'fast' or 'agents', got {method!r}")
@@ -220,6 +255,8 @@ def run_simulation(
         raise ValueError(f"shock.step must be a recorded step, 0 to {n_steps - 1}")
     if shock is not None and shock.size < 1:
         raise ValueError("shock.size must be at least 1")
+    provider_mix = _check_mix(provider_mix, n_agents, "provider_mix")
+    taker_mix = _check_mix(taker_mix, n_agents, "taker_mix")
     fast = method == "fast"    #Checks which method has been selected
     check_stability_condition(alpha, mu, delta)
 
@@ -228,23 +265,42 @@ def run_simulation(
     book = OrderBook(keep_trades=keep_trades,
                      on_trade=step_trade_prices.append if record_trade_prices else None)
 
+    # Agents are created type by type. Within a type, agent i gets offset i % interval, which spreads
+    # that type evenly over the steps. With the default mix this is the paper's population.
+    provider_ids, taker_ids = itertools.count(0), itertools.count(n_agents)     # agent ids, as before
     providers = [
-        LiquidityProvider(agent_id=i, alpha=alpha, q_provider=q_provider, lambda_=lambda_)
-        for i in range(n_agents)
+        LiquidityProvider(agent_id=next(provider_ids), alpha=alpha, q_provider=q_provider, lambda_=lambda_,
+                          interval=agent_type.interval, size=agent_type.size, offset=i % agent_type.interval)
+        for agent_type, count in provider_mix.items() for i in range(count)
     ]
     takers = [
-        LiquidityTaker(agent_id=n_agents + i, mu=mu, q_taker=q_taker)
-        for i in range(n_agents)
+        LiquidityTaker(agent_id=next(taker_ids), mu=mu, q_taker=q_taker,
+                       interval=agent_type.interval, size=agent_type.size, offset=i % agent_type.interval)
+        for agent_type, count in taker_mix.items() for i in range(count)
     ]
+    provider_turns, taker_turns = _turn_lists(providers), _turn_lists(takers)
+
+    def acting_agents(turns: List[List[List[int]]], t: int, probability: float) -> List[int]:
+        """Fast method: the agents that act in step t. For each type, take the agents whose turn it
+        is, draw how many of them act from a Binomial, and pick that many at random."""
+        acting: List[int] = []
+        for lists in turns:
+            on_turn = lists[t % len(lists)]
+            if on_turn:
+                #rng.sample(population, k) selects k unique elements from population w/o replacement
+                acting += [on_turn[j] for j in rng.sample(range(len(on_turn)),
+                                                          rng.binomialvariate(len(on_turn), probability))]
+        if len(turns) > 1:
+            rng.shuffle(acting)     # so that no type always goes first within a step
+        return acting
 
     def providers_act(t: int, lam: Optional[float] = None) -> None:
         """lam, if not None, is this step's mean entry depth lambda(t) (Eq. 4); None means each
         provider uses its own fixed lambda_."""
         if fast:
-            #rng.sample(population, k) selects k unique elements from population w/o replacement
             #So binomial distribution of agents each with prob alpha, then gives number of active agents.
             #Then each selected agent submits an order.
-            for i in rng.sample(range(n_agents), rng.binomialvariate(n_agents, alpha)):
+            for i in acting_agents(provider_turns, t, alpha):
                 providers[i].submit(book, t, p0, rng, lambda_=lam)
         else:
             for p in providers:
@@ -265,18 +321,20 @@ def run_simulation(
                         book.cancel_order(order_id)
 
     def takers_act(t: int, q: Optional[float]) -> int:
-        """Returns the number of market orders that found an empty book.
+        """Returns the number of market orders that were not filled completely (the book side
+        they needed was empty, or ran out part-way through a bigger order).
         Also submits the takers orders, under normal conditions failures should stay 0.
         q, if not None, is this step's shared buy probability (asymmetric flow); None means
         each taker uses its own fixed q_taker."""
         failures = 0
         if fast:
-            for i in rng.sample(range(n_agents), rng.binomialvariate(n_agents, mu)):
-                if takers[i].submit(book, t, rng, q_taker=q) is OrderResult.NO_MATCH:
+            for i in acting_agents(taker_turns, t, mu):
+                if takers[i].submit(book, t, rng, q_taker=q) is not OrderResult.EXECUTED:
                     failures += 1
         else:
             for taker in takers:
-                if taker.maybe_submit(book, timestamp=t, rng=rng, q_taker=q) is OrderResult.NO_MATCH:
+                outcome = taker.maybe_submit(book, timestamp=t, rng=rng, q_taker=q)
+                if outcome is not None and outcome is not OrderResult.EXECUTED:
                     failures += 1
         return failures
 

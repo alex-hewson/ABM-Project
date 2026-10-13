@@ -7,7 +7,8 @@ physics (the shock itself is tested in tests/test_simulation.py).
 
 import numpy as np
 
-from experiments.shock import run_one, BEFORE, QUANTITIES
+from abm.agents import AgentType
+from experiments.shock import run_one, parse_mix, describe_mix, BEFORE, QUANTITIES
 
 
 def check(label, condition):
@@ -20,7 +21,7 @@ WARMUP, AFTER = 300, 250
 
 
 def test_each_run_returns_one_window_per_quantity():
-    r = run_one((40, 3, WARMUP, AFTER, False))
+    r = run_one((40, 3, WARMUP, AFTER, False, None, None))
     check("all four quantities are returned", all(q in r for q in QUANTITIES))
     check("each window has BEFORE + 1 + after values", all(len(r[q]) == BEFORE + 1 + AFTER for q in QUANTITIES))
     check("the price is measured from the step before the shock", r["price"][BEFORE - 1] == 0.0)
@@ -28,9 +29,9 @@ def test_each_run_returns_one_window_per_quantity():
 
 
 def test_same_seed_is_identical_until_the_shock():
-    control = run_one((0, 3, WARMUP, AFTER, False))
-    sell = run_one((40, 3, WARMUP, AFTER, False))
-    buy = run_one((40, 3, WARMUP, AFTER, True))
+    control = run_one((0, 3, WARMUP, AFTER, False, None, None))
+    sell = run_one((40, 3, WARMUP, AFTER, False, None, None))
+    buy = run_one((40, 3, WARMUP, AFTER, True, None, None))
     check("before the shock, the control and the shocked run agree on every quantity",
           all(np.array_equal(control[q][:BEFORE], sell[q][:BEFORE]) for q in QUANTITIES))
     check("the sell order takes 40 units off the bid side at the shock step",
@@ -42,6 +43,39 @@ def test_same_seed_is_identical_until_the_shock():
           and control["bid_volume"][BEFORE] == buy["bid_volume"][BEFORE])
     check("and the price rises", buy["price"][BEFORE] > control["price"][BEFORE])
     check("a shock this small is fully filled", sell["unfilled"] == 0 and buy["unfilled"] == 0)
+
+
+def raises_value_error(fn, *args):
+    try:
+        fn(*args)
+    except ValueError:
+        return True
+    return False
+
+
+def test_mix_options_are_read_correctly():
+    check("no option: None, which means the paper's population", parse_mix(None) is None)
+    check("K:COUNT gives interval = size = K",
+          parse_mix(["1:100", "2:100", "4:50"]) == {AgentType(1, 1): 100, AgentType(2, 2): 100, AgentType(4, 4): 50})
+    check("INTERVAL/SIZE:COUNT sets the two separately", parse_mix(["4/1:250"]) == {AgentType(4, 1): 250})
+    check("the same type given twice is added up", parse_mix(["2:100", "2:50"]) == {AgentType(2, 2): 150})
+    check("nonsense is rejected", raises_value_error(parse_mix, ["fast:10"]) and raises_value_error(parse_mix, ["4"]))
+    check("an interval of 0 is rejected", raises_value_error(parse_mix, ["0:10"]))
+
+
+def test_mix_description():
+    check("default", describe_mix(None) == "250 x 1 unit every step")
+    check("mixed", describe_mix({AgentType(1, 1): 100, AgentType(4, 4): 150})
+          == "100 x 1 unit every step, 150 x 4 units every 4 steps")
+
+
+def test_a_run_with_slow_big_providers_supplies_the_same_volume():
+    slow = run_one((0, 3, 600, AFTER, False, {AgentType(4, 4): 250}, None))
+    plain = run_one((0, 3, 600, AFTER, False, None, None))
+    slow_volume = float(slow["bid_volume"].mean() + slow["ask_volume"].mean())
+    plain_volume = float(plain["bid_volume"].mean() + plain["ask_volume"].mean())
+    check(f"resting volume with 4-step providers ({slow_volume:.0f}) within 6% of the paper's population ({plain_volume:.0f})",
+          abs(slow_volume - plain_volume) < 0.06 * plain_volume)
 
 
 if __name__ == "__main__":

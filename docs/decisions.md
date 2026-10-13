@@ -156,6 +156,23 @@ The paper only has unit orders (P4), so all of this is added:
 
 With every order at size 1 the model is exactly the baseline (D23).
 
+**D27. Agent types: different speeds and order sizes. [Assumed, Checked]**
+Agreed with supervisors on 13 October 2026; the details below are assumptions.
+- A type has an interval and a size. An agent with interval k gets a chance to act every k-th
+  step, and its orders are of the given size. The three types used are 1 unit every step, 2 units
+  every 2 steps and 4 units every 4 steps, so each trades the same volume on average.
+- On its step an agent still acts with probability α (or μ), not every time.
+- Agents of one type are spread evenly over the steps: agent i has offset i mod k. The offsets
+  are fixed, not random, so about the same number of agents get a turn on every step.
+- Providers and takers can both have types, in any mix that adds up to N_A.
+- When several types act in one step, their orders are put in random order, so no type always
+  goes first.
+- A market order that is only partly filled counts as a failed order, like one that finds an
+  empty book.
+
+With every agent of the first type the model is exactly the baseline (D23). Eq. 1 and Eq. 2 still
+hold, counted in units.
+
 ---
 
 ## 5. Still open
@@ -166,5 +183,5 @@ With every order at size 1 the model is exactly the baseline (D23).
 - **What "recovery" means for the price.** In the basic model the price does not come back after a
   shock (`validation.md`, section 8). Either recovery means the book refilling, or something has to
   be added that pulls the price back.
-- **Agents with different speeds and order sizes.** The order book handles sizes (D26); the agents
-  are not built yet.
+- **Which mixes of agent types to compare,** and whether speed and size should also be varied
+  separately (e.g. unit orders every 4 steps).

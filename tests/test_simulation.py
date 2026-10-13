@@ -17,7 +17,8 @@ import numpy as np
 
 from abm.orderbook import Side
 from abm.buy_probability import ConstantSide, BoundedRandomWalk, MeanRevertingWalk
-from abm.simulation import run_simulation, check_stability_condition, Shock, SHOCK_AGENT_ID
+from abm.agents import AgentType, is_turn
+from abm.simulation import run_simulation, check_stability_condition, Shock, SHOCK_AGENT_ID, _turn_lists
 
 
 def check(label, condition):
@@ -361,6 +362,108 @@ def test_shock_parameters_are_validated():
         lambda: run_simulation(shock=Shock(step=600, size=5), **SHOCK_KWARGS)))
     check("shock of size 0 rejected", raises_value_error(
         lambda: run_simulation(shock=Shock(step=10, size=0), **SHOCK_KWARGS)))
+
+# Faster dynamics than the paper's parameters (as in the Eq. 2 tests above), so a short run settles.
+MIX_KWARGS = dict(n_agents=250, alpha=0.3, mu=0.1, delta=0.2, lambda_=100, n_steps=3000)
+MIX_EQ2_VOLUME = eq2_equilibrium_orders(250, 0.3, 0.1, 0.2)      # 175 units
+MIX_TRADED_PER_STEP = 250 * 0.1                                  # mu * N_A = 25 units
+
+
+def settled_volume(result):
+    """Mean resting units over the second half of a run (needs record_sides=True)."""
+    volume = result.bid_volume_series + result.ask_volume_series
+    return float(np.mean(volume[len(volume) // 2:]))
+
+
+def test_the_default_mix_is_the_papers_population():
+    kwargs = dict(n_agents=125, alpha=0.15, mu=0.025, delta=0.025, lambda_=100, n_steps=1000, seed=3)
+    for method in ("fast", "agents"):
+        plain = run_simulation(method=method, **kwargs)
+        explicit = run_simulation(method=method, provider_mix={AgentType(1, 1): 125},
+                                  taker_mix={AgentType(1, 1): 125}, **kwargs)
+        check(f"{method}: writing the default mix out gives the identical run",
+              run_fingerprint(plain) == run_fingerprint(explicit))
+
+
+def test_mix_must_add_up_to_the_number_of_agents():
+    kwargs = dict(n_agents=100, alpha=0.15, mu=0.025, delta=0.025, lambda_=100, n_steps=10)
+    check("too few providers rejected", raises_value_error(
+        lambda: run_simulation(provider_mix={AgentType(1, 1): 60, AgentType(4, 4): 30}, **kwargs)))
+    check("too many takers rejected", raises_value_error(
+        lambda: run_simulation(taker_mix={AgentType(2, 2): 101}, **kwargs)))
+    check("a negative count rejected", raises_value_error(
+        lambda: run_simulation(provider_mix={AgentType(1, 1): 110, AgentType(4, 4): -10}, **kwargs)))
+    ok = run_simulation(provider_mix={AgentType(1, 1): 60, AgentType(4, 4): 40, AgentType(2, 2): 0}, **kwargs)
+    check("a mix that adds up runs (a type with 0 agents is ignored)", len(ok.mid_price_series) == 10)
+
+
+def test_slow_agents_are_spread_evenly_over_the_steps():
+    class Stub:
+        def __init__(self, interval, offset):
+            self.interval, self.size, self.offset = interval, interval, offset
+    agents = [Stub(4, i % 4) for i in range(10)] + [Stub(1, 0) for _ in range(3)]
+    fours, ones = _turn_lists(agents)
+    check("one list per step of the cycle", len(fours) == 4 and len(ones) == 1)
+    check("10 agents over 4 steps: 3, 2, 2, 3 (never more than one apart)", [len(x) for x in fours] == [3, 2, 2, 3])
+    check("every agent is on exactly one list", sorted(i for x in fours for i in x) == list(range(10)))
+    check("each list holds the agents whose turn that step is",
+          all(is_turn(t, 4, agents[i].offset) for t in range(4) for i in fours[t]))
+    check("an every-step type has all its agents on its one list", ones == [[10, 11, 12]])
+
+
+def test_every_provider_type_supplies_the_same_volume():
+    """1 unit every step, 2 every 2 steps, 4 every 4 steps: the same units per step on average,
+    so the book settles at the same volume (Eq. 2, counted in units)."""
+    volumes, orders = {}, {}
+    for k in (1, 2, 4):
+        r = run_simulation(provider_mix={AgentType(k, k): 250}, record_sides=True, seed=20 + k, **MIX_KWARGS)
+        volumes[k] = settled_volume(r)
+        orders[k] = float(np.mean(r.total_orders_series[1500:]))
+        check(f"providers of type {k}: settled volume {volumes[k]:.1f} within 4% of Eq. 2's {MIX_EQ2_VOLUME:.0f}",
+              abs(volumes[k] - MIX_EQ2_VOLUME) < 0.04 * MIX_EQ2_VOLUME)
+        check(f"providers of type {k}: no market order went unfilled", r.n_match_failures == 0)
+    check("with unit orders, orders = units", abs(orders[1] - volumes[1]) < 1e-9)
+    check(f"bigger orders mean fewer of them for the same volume ({orders[1]:.0f} > {orders[2]:.0f} > {orders[4]:.0f})",
+          orders[1] > orders[2] > orders[4])
+
+
+def test_every_taker_type_removes_the_same_volume():
+    for k in (1, 2, 4):
+        r = run_simulation(taker_mix={AgentType(k, k): 250}, record_sides=True, seed=30 + k, **MIX_KWARGS)
+        per_step = r.book.volume_traded / MIX_KWARGS["n_steps"]
+        check(f"takers of type {k}: {per_step:.2f} units traded per step, within 3% of mu*N_A = {MIX_TRADED_PER_STEP:.0f}",
+              abs(per_step - MIX_TRADED_PER_STEP) < 0.03 * MIX_TRADED_PER_STEP)
+        volume = settled_volume(r)
+        check(f"takers of type {k}: settled volume {volume:.1f} within 4% of Eq. 2's {MIX_EQ2_VOLUME:.0f}",
+              abs(volume - MIX_EQ2_VOLUME) < 0.04 * MIX_EQ2_VOLUME)
+
+
+def test_a_mixed_population_settles_at_the_same_volume():
+    mix = {AgentType(1, 1): 100, AgentType(2, 2): 100, AgentType(4, 4): 50}
+    r = run_simulation(provider_mix=mix, taker_mix=mix, record_sides=True, seed=41, **MIX_KWARGS)
+    volume = settled_volume(r)
+    check(f"mixed providers and takers: settled volume {volume:.1f} within 4% of Eq. 2's {MIX_EQ2_VOLUME:.0f}",
+          abs(volume - MIX_EQ2_VOLUME) < 0.04 * MIX_EQ2_VOLUME)
+    per_step = r.book.volume_traded / MIX_KWARGS["n_steps"]
+    check(f"and {per_step:.2f} units traded per step, within 3% of {MIX_TRADED_PER_STEP:.0f}",
+          abs(per_step - MIX_TRADED_PER_STEP) < 0.03 * MIX_TRADED_PER_STEP)
+
+
+def test_fast_and_per_agent_methods_agree_for_a_mixed_population():
+    mix = {AgentType(1, 1): 100, AgentType(2, 2): 100, AgentType(4, 4): 50}
+    stats = {}
+    for method in ("fast", "agents"):
+        volumes, traded = [], []
+        for seed in range(6):
+            r = run_simulation(provider_mix=mix, taker_mix=mix, record_sides=True, method=method, seed=seed,
+                               **{**MIX_KWARGS, "n_steps": 1500})
+            volumes.append(settled_volume(r))
+            traded.append(r.book.volume_traded / 1500)
+        stats[method] = (float(np.mean(volumes)), float(np.mean(traded)))
+    (v_fast, t_fast), (v_agents, t_agents) = stats["fast"], stats["agents"]
+    check(f"settled volume: fast {v_fast:.1f} vs per-agent {v_agents:.1f}, within 2%", abs(v_fast - v_agents) < 0.02 * v_agents)
+    check(f"units traded per step: fast {t_fast:.2f} vs per-agent {t_agents:.2f}, within 2%",
+          abs(t_fast - t_agents) < 0.02 * t_agents)
 
 
 if __name__ == "__main__":

@@ -153,6 +153,21 @@ for D23 still gives the same numbers, and a shock run gives the same result as b
 is about 8% slower (0.22 to 0.24 ms per step, N_A = 250), because every order now carries and checks
 a size.
 
+**Agent types (D27).** Checked in `tests/test_simulation.py` at test parameters α=0.3, μ=0.1, δ=0.2,
+N_A=250, where Eq. 2 gives 175 units and μN_A = 25 units traded per step:
+
+| All agents of type | Providers: settled volume | Takers: units traded per step | Takers: settled volume |
+|---|---|---|---|
+| 1 unit every step | 174.4 | 24.88 | 175.1 |
+| 2 units every 2 steps | 175.5 | 24.85 | 175.5 |
+| 4 units every 4 steps | 173.6 | 25.08 | 174.5 |
+
+So each type supplies and removes the same volume, and Eq. 2 holds in units. Bigger orders mean
+fewer of them for the same volume (174, 89 and 45 resting orders). A mixed population (100 / 100 /
+50 of the three types, for both providers and takers) settles at 175.3 units with 24.96 traded per
+step. The fast and per-agent methods agree for that mix (174.8 vs 175.4 units, 24.88 vs 25.04
+traded per step, over 6 seeds each).
+
 **Environment (D9).** Python 3.14.6, numpy 2.5.0, matplotlib 3.11.0 on an Intel i5-8365U laptop
 (4 cores / 8 threads).
 
@@ -202,3 +217,25 @@ ticks, so differences of 1–2 ticks are noise. That covers the 0.20 for size 50
   gives a half-life of ln 2 / δ = 27.7 steps and 90% after ln 10 / δ = 92 steps (measured: 27–28 and
   89–90). The refill time does not depend on the size of the shock.
 - The ask side is not affected.
+
+## 9. Shock test with different provider types (first look)
+
+The shock test of section 8, repeated with the providers changed (D27). Takers are the paper's.
+Sizes 150 and 300, mean of 200 runs each (`results/shock_providers2.png`, `shock_providers4.png`,
+`shock_mixed.png`; commit 26eafb2 plus the agent-type code). The first row is section 8 (400 runs).
+
+| Providers | Spread before | Price at the shock (150 / 300) | Bids half-life (150 / 300) | Bids 90% back (150 / 300) |
+|---|---|---|---|---|
+| all 1 unit every step | 23.2 | −18.0 / −38.0 | 27 / 28 steps | 90 / 90 steps |
+| all 2 units every 2 steps | 22.2 | −18.5 / −38.7 | 29 / 28 | 93 / 97 |
+| all 4 units every 4 steps | 21.8 | −18.0 / −37.9 | 27 / 28 | 85 / 86 |
+| 100 / 100 / 50 of the three | 22.5 | −17.5 / −37.7 | 29 / 28 | 86 / 90 |
+
+- **The provider type makes no clear difference to the average recovery.** The price impact and the
+  refill time are the same within noise for every mix. The price still does not come back.
+- This is expected. Every type supplies the same volume per step, and the refill time is set by the
+  cancellation probability δ (section 8), which is the same for all of them.
+- The spread before the shock is slightly narrower with bigger orders (21.8 against 23.2 ticks).
+  Whether that difference is real has not been checked.
+- Only averages over runs were compared. Bigger, slower orders should make single runs lumpier,
+  which an average does not show.
