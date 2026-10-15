@@ -114,7 +114,8 @@ limits) and needs rewriting.
 ## Immediate next steps
 
 1. Find value trader settings (number, window, size of shifts) that give recovery after a shock
-   without pinning the price in normal times: sweep them, and plot recovery time against H.
+   without pinning the price in normal times. The sweep is ready to run on the cluster
+   (`experiments/value_sweep.py`, `cluster/value_sweep.slurm`).
 2. Give value traders the speed and size types (D27), to see whether fast and slow value traders
    recover differently.
 3. When the E-mini data arrives: find out its form and the rules for using it, keep it out of the

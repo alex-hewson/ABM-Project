@@ -189,6 +189,58 @@ below it and sells when above. With them the price recovers after a shock:
 python -m experiments.shock --value-traders 125 --out results/shock_value125.png
 ```
 
+### Value trader sweep
+
+Tries 48 combinations of value trader settings (share of takers, window, mean shift), plus a control
+with none. Each combination gets a shock test and a long run without a shock, so that recovery speed
+can be set against how market-like the price is in normal times (`experiments/value_sweep.py`):
+
+```
+python -m experiments.value_sweep list                     # the combinations, numbered 0 to 48
+python -m experiments.value_sweep run --index 7 --workers 8
+python -m experiments.value_sweep collect                  # table + figure, results/value_sweep/
+```
+
+At the default size it is meant for a cluster: one combination per job (see below).
+
+### Running on a cluster (Slurm)
+
+Once, on the cluster:
+
+```
+git clone https://github.com/alex-hewson/ABM-Project.git
+cd ABM-Project
+python3 --version
+python3 -m venv ~/abm-env
+source ~/abm-env/bin/activate
+pip install numpy matplotlib pytest
+python -m pytest tests -q
+mkdir -p logs
+```
+
+`python3 --version` must show 3.12 or newer; if not, look for a newer Python with `module avail`.
+One test compares a run against exact numbers recorded on the laptop; on a different Python version
+it can fail without anything being wrong. The other tests should all pass.
+
+To run the value trader sweep, check the settings at the top of `cluster/value_sweep.slurm`, then:
+
+```
+git pull
+sbatch cluster/value_sweep.slurm
+squeue -u $USER
+```
+
+Each job writes its progress to `logs/value_sweep_<number>.out`. When they have finished, copy the
+results to the laptop (run this on the laptop, from the project folder) and collect them:
+
+```
+scp -r <username>@<cluster address>:ABM-Project/results/value_sweep results/
+python -m experiments.value_sweep collect
+```
+
+Always give experiments `--workers` on a cluster: without it they use every CPU on the machine, not
+just the ones the job was given.
+
 ## Requirements
 
 Python 3.12+ (the fast simulation method uses `random.binomialvariate`) with `numpy`, `matplotlib`

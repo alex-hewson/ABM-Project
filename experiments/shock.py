@@ -182,7 +182,7 @@ def plot(means, sizes, config, out):
     print(f"saved {out}")
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--sizes", type=int, nargs="+", default=[0, 50, 150, 300],
                         help="shock sizes in units; 0 is the control with no shock")
@@ -202,7 +202,7 @@ def main():
                         help="mean distance of a value trader's own value from the reference, in ticks (default 50)")
     parser.add_argument("--workers", type=int, default=None, help="processes to use (default: all cores)")
     parser.add_argument("--out", type=Path, default=Path("results/shock_test.png"))
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.warmup < BEFORE or args.after < TAIL:
         parser.error(f"--warmup must be at least {BEFORE} and --after at least {TAIL}")
 

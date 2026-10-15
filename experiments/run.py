@@ -252,6 +252,8 @@ def main(argv=None):
                         help="mean distance of a value trader's own value from the reference, in ticks (default 50)")
     parser.add_argument("--n-steps", type=int, default=1_000_000)
     parser.add_argument("--n-runs", type=int, default=50, help="runs per N_A")
+    parser.add_argument("--agent-counts", type=int, nargs="+", default=list(AGENT_COUNTS),
+                        help=f"which N_A to run (default: all of {AGENT_COUNTS})")
     parser.add_argument("--workers", type=int, default=os.cpu_count())
     parser.add_argument("--out", type=Path, default=None,
                         help="results file (default: results/<flow>.pkl)")
@@ -307,7 +309,7 @@ def main(argv=None):
         if (config["git"] or {}).get("commit") != git["commit"]:
             config["resumed_with_git"] = git
 
-    all_keys = [(n, seed) for n in AGENT_COUNTS for seed in range(args.n_runs)]
+    all_keys = [(n, seed) for n in args.agent_counts for seed in range(args.n_runs)]
     extra = sorted(set(finished) - set(all_keys))
     if extra:
         raise SystemExit(f"The saved runs include {len(extra)} beyond --n-runs={args.n_runs} (e.g. N_A={extra[0][0]}, "
@@ -329,7 +331,7 @@ def main(argv=None):
     print("value traders: none" if traders is None else
           f"value traders: {traders['fraction']:.0%} of the takers (window {traders['window']}, "
           f"mean shift {traders['spread']:g} ticks)")
-    print(f"{len(all_keys)} runs ({args.n_runs} per N_A in {AGENT_COUNTS}), {args.n_steps:,} steps each, "
+    print(f"{len(all_keys)} runs ({args.n_runs} per N_A in {tuple(args.agent_counts)}), {args.n_steps:,} steps each, "
           f"{args.workers} workers")
     print(f"code version: {describe(config['git'])}")
     if git["dirty"]:
