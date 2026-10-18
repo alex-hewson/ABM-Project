@@ -19,13 +19,15 @@ first. Crypto or prediction markets only if there is time.
 - Orders bigger than one unit.
 - Agents with different speeds and order sizes (1 unit every step, 2 every 2, 4 every 4). Each type
   trades the same volume. On their own they do not change the average recovery.
-- Value traders, which buy below their own idea of the value and sell above it. With them the price
-  recovers. At the first settings tried, they also hold the price too still in normal times.
+- Value traders, which buy below their own estimate of the asset's true value and sell above it.
+  The true value moves only with news, so a large order does not change it, and the price recovers.
+  A first version based each trader's value on the recent price instead, which made the price drift.
 
 ## Steps
 
-1. Sweep the value trader settings (how many, how long their memory, how far apart their values)
-   to find settings that give recovery without holding the price still. Running on the cluster.
+1. Sweep the value trader settings (how many, how far apart their estimates, how much news moves
+   the true value) to find settings that give recovery without changing how the price behaves in
+   normal times. Running on the cluster.
 2. E-mini data: measure order arrival and cancellation rates, order sizes, the spread and the depth
    of the book, and set the model's parameters from them. Then find large orders in the data and
    measure how the real book recovers after them.
@@ -43,7 +45,9 @@ of February, then write-up.
 - How to turn simulation steps into real time.
 - What "recovery" should mean: the price coming back, the book refilling, or both. And how to
   measure it in real data.
-- Whether value traders can give recovery without making the price too still.
+- How much of the price's behaviour over long times comes from the news rather than the order book.
+- Where fat tails should come from. In the base model they only appear with the Eq. 4 mechanism. An
+  idea: providers place orders further away when recent volatility is high.
 
 ## Not planned
 
