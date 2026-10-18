@@ -144,7 +144,7 @@ def plot_summary(rows, out: Path) -> None:
     handles += [plt.Line2D([], [], marker="*", ls="", color="k", markersize=12, label="no value traders")]
     axes[1].legend(handles=handles, fontsize=7, loc="upper left", bbox_to_anchor=(1.02, 1))
     fig.suptitle("Value trader sweep: lower is faster recovery, nearer the dashed line is more market-like")
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0, 0.87, 1))      # leave room on the right for the legend
     fig.savefig(out, dpi=130)
     plt.close(fig)
 

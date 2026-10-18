@@ -222,13 +222,21 @@ mkdir -p logs
 One test compares a run against exact numbers recorded on the laptop; on a different Python version
 it can fail without anything being wrong. The other tests should all pass.
 
-To run the value trader sweep, check the settings at the top of `cluster/value_sweep.slurm`, then:
+To run the value trader sweep, switch the Python environment on, go to the project folder, check
+the settings at the top of `cluster/value_sweep.slurm`, then:
 
 ```
 git pull
-sbatch cluster/value_sweep.slurm
+sbatch --cpus-per-task=16 cluster/value_sweep.slurm
 squeue -u $USER
 ```
+
+The jobs use the Python environment that was switched on when they were submitted.
+
+Use `sbatch`, not `srun`. On this cluster an interactive `srun` hangs without printing anything,
+because its output cannot get back to the login node. A quick test can be run as a batch job
+instead, e.g. `sbatch --partition=cpu --wrap="python --version"`, and its output read from the
+`slurm-<number>.out` file it leaves in the current folder.
 
 Each job writes its progress to `logs/value_sweep_<number>.out`. When they have finished, copy the
 results to the laptop (run this on the laptop, from the project folder) and collect them:
