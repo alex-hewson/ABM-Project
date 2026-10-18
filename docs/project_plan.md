@@ -106,18 +106,20 @@ Agreed so far:
 - Each agent has its own starting offset, so slow agents do not all act on the same steps.
 - An order of size 4 is cancelled as a whole.
 
-`phase2_plan.md` still describes the earlier plan (large seller, intermediaries with inventory
-limits) and needs rewriting.
+The plan for the rest of Phase 2 is in `phase2_plan.md`.
 
 ---
 
 ## Immediate next steps
 
-1. Find value trader settings (number, window, size of shifts) that give recovery after a shock
+1. Find value trader settings (number, size of errors, amount of news) that give recovery after a shock
    without pinning the price in normal times. The sweep is ready to run on the cluster
    (`experiments/value_sweep.py`, `cluster/value_sweep.slurm`).
 2. Give value traders the speed and size types (D27), to see whether fast and slow value traders
    recover differently.
-3. When the E-mini data arrives: find out its form and the rules for using it, keep it out of the
+3. Fat tails: providers that place their orders further from the midpoint when recent volatility is
+   high. This keeps the idea of Eq. 4 (entry depth widens in turbulent times), but providers react
+   to something they can see, the recent price changes, instead of the takers' hidden buy
+   probability. The basic model has no fat tails without it (`decisions.md`, section 5).
+4. When the E-mini data arrives: find out its form and the rules for using it, keep it out of the
    repository, then measure order rates and the response to large orders in it.
-4. Rewrite `phase2_plan.md` for the new direction.

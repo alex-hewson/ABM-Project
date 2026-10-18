@@ -473,8 +473,8 @@ def test_value_trader_settings_are_validated():
     check("more value traders than agents rejected", raises_value_error(
         lambda: run_simulation(n_value_traders=251, **kwargs)))
     check("a negative number rejected", raises_value_error(lambda: run_simulation(n_value_traders=-1, **kwargs)))
-    check("a window of 0 steps rejected", raises_value_error(
-        lambda: run_simulation(n_value_traders=10, value_window=0, **kwargs)))
+    check("a negative true value step rejected", raises_value_error(
+        lambda: run_simulation(n_value_traders=10, true_value_step=-1.0, **kwargs)))
     check("a negative spread rejected", raises_value_error(
         lambda: run_simulation(n_value_traders=10, value_spread=-1.0, **kwargs)))
     check("a taker mix must add up to the takers that are left", raises_value_error(
@@ -486,20 +486,41 @@ def test_value_trader_settings_are_validated():
 
 def test_without_value_traders_nothing_about_them_is_recorded():
     r = run_simulation(n_steps=50, seed=1, **VALUE_KWARGS)
-    check("no reference series and no shifts", len(r.reference_series) == 0 and len(r.value_shifts) == 0)
+    check("no true value series and no shifts", len(r.true_value_series) == 0 and len(r.value_shifts) == 0)
 
 
-def test_reference_price_is_the_mean_of_the_recent_mid_prices():
-    window = 50
-    r = run_simulation(n_steps=400, seed=5, n_value_traders=100, value_window=window, **VALUE_KWARGS)
-    mids = np.array(r.mid_price_series, dtype=float)
-    check("before there is any history the reference is the start price", r.reference_series[0] == 1_000_000)
-    check("after 10 steps it is the mean of those 10 mid-prices",
-          abs(r.reference_series[10] - mids[:10].mean()) < 1e-6)
-    check("after that it is the mean of the last 50, at every step",
-          all(abs(r.reference_series[s] - mids[s - window:s].mean()) < 1e-6 for s in range(window, 400)))
-    check("one shift per value trader, some above the reference and some below",
+def test_true_value_starts_at_the_market_and_then_moves_with_news_only():
+    r = run_simulation(n_steps=20_000, seed=5, n_value_traders=100, true_value_step=2.0, **VALUE_KWARGS)
+    steps = np.diff(r.true_value_series)
+    check("it starts near the start price (the midpoint after the pre-opening)",
+          abs(r.true_value_series[0] - 1_000_000) < 200)
+    check(f"each step it moves by a random amount with standard deviation {steps.std():.3f}, within 3% of 2",
+          abs(steps.std() - 2.0) < 0.06)
+    check(f"with no drift: mean step {steps.mean():.4f}, within 0.05 of 0", abs(steps.mean()) < 0.05)
+    still = run_simulation(n_steps=500, seed=5, n_value_traders=100, true_value_step=0.0, **VALUE_KWARGS)
+    check("with no news it never moves", np.all(still.true_value_series == still.true_value_series[0]))
+    check("one shift per value trader, some above the true value and some below",
           len(r.value_shifts) == 100 and (r.value_shifts > 0).any() and (r.value_shifts < 0).any())
+
+
+def test_price_follows_the_true_value_instead_of_drifting_away():
+    """The earlier design (each trader's value = its shift above a moving average of the price) made the
+    price run away, 10-48 ticks per 1000 steps, in the direction of the traders' middle shift. With a
+    true value that ignores the price, the price sits a fixed distance from it (about the middle shift,
+    where buyers and sellers balance) and moves with it."""
+    n_steps = 40_000
+    for seed in range(4):
+        r = run_simulation(n_steps=n_steps, seed=seed, n_value_traders=25, true_value_step=1.0, value_spread=150.0,
+                           keep_trades=False, **VALUE_KWARGS)
+        mid = np.array(r.mid_price_series, dtype=float)
+        gap = mid - r.true_value_series
+        middle = float(np.median(r.value_shifts))
+        half = n_steps // 2
+        growth = (gap[half:].mean() - gap[1000:half].mean()) / (half - 500) * 1000
+        check(f"seed {seed}: the gap changes by {growth:+.1f} ticks per 1000 steps, less than 3 either way "
+              f"(the old design drifted 10-48)", abs(growth) < 3)
+        check(f"seed {seed}: the price sits {gap[1000:].mean():+.1f} ticks from the true value, "
+              f"within 35 of the middle shift {middle:+.1f}", abs(gap[1000:].mean() - middle) < 35)
 
 
 def test_market_stays_healthy_with_value_traders():

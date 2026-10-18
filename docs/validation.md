@@ -242,6 +242,9 @@ Sizes 150 and 300, mean of 200 runs each (`results/shock_providers2.png`, `shock
 
 ## 10. Shock test with value traders
 
+*First design, with a moving average of the price as the reference. Replaced by the true value (D30);
+see section 12.*
+
 The shock test of section 8, with some of the 250 takers replaced by value traders (D28). Sell orders
 of 150 and 300 units, mean of 200 runs each (`results/shock_value50.png`, `shock_value125.png`,
 `shock_value125_spread10.png`; commit a6777e4 plus the value trader code). The first row is section 8.
@@ -275,6 +278,9 @@ is noise). The fast and per-agent methods agree with value traders present (volu
 spread 18.1 vs 18.5).
 
 ## 11. What value traders do to the price in normal times (first look)
+
+*First design, with a moving average of the price as the reference. Replaced by the true value (D30);
+see section 12.*
 
 No shock. A share of the takers are value traders (D28, with the default window of 1,000 steps and
 mean shift of 50 ticks). 10⁵ steps, 8 runs per N_A, values for N_A = 500 with the median trade price
@@ -312,8 +318,9 @@ lag of one 50-step block.
 - **Volatility clustering is unchanged in the full model:** the size of price changes stays
   correlated for about 700 steps, with or without value traders. It comes from Eq. 4, where the entry
   depth follows the trend. The basic model has almost none (0.08 at the first lag only).
-- **At lags past the window, H in the basic model rises above 0.5** (0.62–0.75 at 10⁴). The price
-  is free again there and its spread has to catch up. Runs of 10⁵ steps cannot show whether H then
+- **At lags past the window, H in the basic model rises above 0.5** (0.62–0.75 at 10⁴). This was
+  first put down to the price catching up once free of the window. That was wrong: it is a drift
+  built into this design (section 12). Runs of 10⁵ steps cannot show whether H then
   returns to 0.5; that needs longer runs.
 
 **What this means.** At these settings the value traders are too strong for normal times. Real
@@ -321,3 +328,41 @@ prices have H close to 0.5 and no autocorrelation in their changes. So there is 
 traders are needed for the price to recover after a shock (section 10), but too many, or with too
 long a memory, pin the price down. The number of value traders, the window and the size of the
 shifts have to be set so that both hold, and real data should fix them.
+
+## 12. Value trader sweep, and the switch to a true value
+
+**Sweep with the first design.** 48 settings plus a control, run on the cluster
+(`experiments/value_sweep.py`; commit 3f726d9): 2–20% value traders, windows of 100–3,000 steps, mean
+shifts of 50–500 ticks. Shock test with 200 runs per size; runs without a shock of 10⁶ steps, 16 runs,
+N_A = 500.
+
+- Recovery needs small shifts and enough traders. With a mean shift of 50 ticks and 20% value traders
+  the half-life after a 300-unit sell was about 100 steps; with 10%, 270–340 steps (windows of 1,000
+  and 3,000). With shifts of 500 the price almost never recovered within 2,000 steps.
+- Recovery also needs a long window. With 100 steps it never recovered: the reference average had
+  caught up with the fallen price before the traders pushed it back.
+- H at a lag of 10⁵ steps was 0.84–0.99 for almost every setting, even with 2% value traders, against
+  0.41 for the control. That means the price kept moving one way for very long stretches.
+
+**The cause: a drift.** Each trader's value was its shift above the price's own recent average, and
+the shifts are drawn at random, so in any one run they do not balance. The price settles where
+buyers and sellers balance, about the middle shift away from its own average. Since the average
+follows the price, the price can only stay there by moving steadily. Checked directly (N_A = 250, 25
+value traders, window 300, mean shift 150, 2×10⁵ steps, 8 runs): in every run the price drifted the
+way of the middle shift, by 10–48 ticks per 1,000 steps. Balancing the shifts in mirrored pairs cut
+it to 4–10.
+
+**The fix: a true value (D30).** With the same seeds and settings, but with each trader's value set
+from a true value that only moves with news (1 tick per step), the price stays a fixed distance from
+the true value (about the middle shift) and moves with it. Over 2×10⁵ steps, the price and the true
+value moved by the same amount to within 0.7 ticks per 1,000 steps.
+
+**First check of the new design** (laptop, commit 3f726d9 plus the change):
+- Shock test, 20% value traders (50 of 250), mean error 50 ticks, news 1 tick per step, 100 runs: the
+  price recovers half of a 300-unit drop in 87 steps.
+- Without a shock, 20% value traders, same settings, 2×10⁵ steps, 8 runs, N_A = 500: H(10) = 0.07,
+  H(100) = 0.20, H(10³) = 0.45, H(10⁴) = 0.50, RMS change over 800 steps 30.2 ticks, kurtosis 3.05.
+  These are nearly the same as without value traders (0.08, 0.19, 0.44, 0.48; 30.6 ticks; 2.92). So the
+  side effects of the first design (section 11) are gone. Note that 1 tick of news per step was chosen
+  to give about the same long-run wandering as the basic model, so the long-lag values are partly an
+  input (D30).

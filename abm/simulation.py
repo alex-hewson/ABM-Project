@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import itertools
 import random
-from collections import deque
 from dataclasses import dataclass, field
 from typing import Dict, List, Mapping, Optional
 
@@ -102,9 +101,9 @@ class SimulationResult:
     ask_volume_series: np.ndarray = field(default_factory=lambda: np.empty(0))  # resting units, sell side
     # How many units of the shock found nothing left to trade against (0 if there was no shock).
     shock_unfilled: int = 0
-    # Value traders (filled only if run_simulation had n_value_traders above 0): the shared reference
-    # price they used in each step, and each trader's own fixed shift from it.
-    reference_series: np.ndarray = field(default_factory=lambda: np.empty(0))
+    # Value traders (filled only if run_simulation had n_value_traders above 0): the asset's true value
+    # in each step, and each trader's own fixed error (shift) in estimating it.
+    true_value_series: np.ndarray = field(default_factory=lambda: np.empty(0))
     value_shifts: np.ndarray = field(default_factory=lambda: np.empty(0))
 
 
@@ -193,7 +192,7 @@ def run_simulation(
     provider_mix: Optional[Mapping[AgentType, int]] = None,
     taker_mix: Optional[Mapping[AgentType, int]] = None,
     n_value_traders: int = 0,
-    value_window: int = 1000,
+    true_value_step: float = 1.0,
     value_spread: float = 50.0,
 ) -> SimulationResult:
     """
@@ -253,12 +252,13 @@ def run_simulation(
 
     n_value_traders turns that many of the n_agents takers into value traders (see ValueTrader in
     agents.py); 0 (the default) leaves the run exactly as it was. They act at the same rate mu, so the
-    number of orders per step is unchanged. Their shared reference price is the mean of the mid-price
-    at the end of the last value_window steps (the start price until there is any history). Each
-    trader's own value is the reference plus a fixed shift, + or - with equal chance and exponentially
-    distributed with mean value_spread ticks. If taker_mix is given with value traders, it must add
-    up to the takers that are left, n_agents - n_value_traders. The reference used in each step is
-    returned in result.reference_series.
+    number of orders per step is unchanged. They all estimate the asset's true value, which does not
+    depend on the price: it starts at the midpoint at the end of the pre-opening, then moves like a
+    random walk, by a normally distributed step with standard deviation true_value_step ticks each
+    step (news; 0 means no news). Each trader's own value is the true value plus a fixed error, + or -
+    with equal chance and exponentially distributed with mean value_spread ticks. If taker_mix is given
+    with value traders, it must add up to the takers that are left, n_agents - n_value_traders. The
+    true value in each step is returned in result.true_value_series.
     """
     if method not in ("fast", "agents"):
         raise ValueError(f"method must be 'fast' or 'agents', got {method!r}")
@@ -274,8 +274,8 @@ def run_simulation(
         raise ValueError("shock.size must be at least 1")
     if not (0 <= n_value_traders <= n_agents):
         raise ValueError(f"n_value_traders must be between 0 and n_agents = {n_agents}")
-    if value_window < 1:
-        raise ValueError("value_window must be at least 1 step")
+    if true_value_step < 0:
+        raise ValueError("true_value_step must be 0 or more")
     if value_spread < 0:
         raise ValueError("value_spread must be 0 or more")
     provider_mix = _check_mix(provider_mix, n_agents, "provider_mix")
@@ -307,12 +307,6 @@ def run_simulation(
         for _ in range(n_value_traders)
     ]
     provider_turns, taker_turns, value_turns = _turn_lists(providers), _turn_lists(takers), _turn_lists(value_traders)
-    recent_mids: deque = deque()      # mid-prices of the last value_window steps, for the reference price
-    recent_mids_sum = 0.0
-
-    def reference_price() -> float:
-        """The value traders' shared reference: the mean of the recent mid-prices."""
-        return recent_mids_sum / len(recent_mids) if recent_mids else float(p0)
 
     def acting_agents(turns: List[List[List[int]]], t: int, probability: float) -> List[int]:
         """Fast method: the agents that act in step t. For each type, take the agents whose turn it
@@ -360,8 +354,7 @@ def run_simulation(
         Also submits the takers orders, under normal conditions failures should stay 0.
         q, if not None, is this step's shared buy probability (asymmetric flow); None means
         each taker uses its own fixed q_taker.
-        Value traders act in this part of the step too, with reference as their shared reference
-        price. Their orders are limit orders, so they are never counted as failures."""
+        Value traders act in this part of the step too, with reference as the asset's true value. Their orders are limit orders, so they are never counted as failures."""
         failures = 0
         if fast and not value_traders:
             for i in acting_agents(taker_turns, t, mu):
@@ -409,7 +402,11 @@ def run_simulation(
     n_bids_series, n_asks_series = np.zeros(n_side, dtype=int), np.zeros(n_side, dtype=int)
     bid_volume_series, ask_volume_series = np.zeros(n_side, dtype=int), np.zeros(n_side, dtype=int)
     shock_unfilled = 0
-    reference_series = np.empty(n_steps) if value_traders else np.empty(0)
+    true_value_series = np.empty(n_steps) if value_traders else np.empty(0)
+    # The true value starts where the pre-opening left the market (the start price if the book still
+    # has no midpoint). It does not depend on the price after that.
+    true_value = book.mid_price()
+    true_value = float(p0) if true_value is None else true_value
 
     for t in range(pre_opening_steps, pre_opening_steps + n_steps):
         step = t - pre_opening_steps
@@ -421,10 +418,11 @@ def run_simulation(
 
         providers_act(t, lambda_now)            # 1. Providers act
         cancellation_sweep()                    # 2. Each resting order removed w.p. delta
-        reference_now = reference_price() if value_traders else 0.0
         if value_traders:
-            reference_series[step] = reference_now
-        n_match_failures += takers_act(t, q_now, reference_now)    # 3. Takers (and value traders) act
+            true_value_series[step] = true_value
+        n_match_failures += takers_act(t, q_now, true_value)    # 3. Takers (and value traders) act
+        if value_traders and true_value_step > 0:
+            true_value += rng.gauss(0.0, true_value_step)     # news: next step's true value
         if taker_flow is not None:
             q_taker_series[step] = q_now
             taker_flow.advance(rng)             # next step's value; step 0 used the starting value
@@ -438,12 +436,6 @@ def run_simulation(
         mid_now = book.mid_price()
         mid_price_series.append(mid_now)
         total_orders_series.append(book.total_orders())
-        if value_traders and mid_now is not None:
-            # Keep the last value_window mid-prices and their sum, for the next step's reference.
-            recent_mids.append(mid_now)
-            recent_mids_sum += mid_now
-            if len(recent_mids) > value_window:
-                recent_mids_sum -= recent_mids.popleft()
         if record_sides:
             best_bid, best_ask = book.best_bid(), book.best_ask()
             if best_bid is not None:
@@ -483,7 +475,7 @@ def run_simulation(
         bid_volume_series=bid_volume_series,
         ask_volume_series=ask_volume_series,
         shock_unfilled=shock_unfilled,
-        reference_series=reference_series,
+        true_value_series=true_value_series,
         value_shifts=np.array([v.shift for v in value_traders]),
     )
 

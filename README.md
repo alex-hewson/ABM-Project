@@ -2,17 +2,17 @@
 
 An agent-based model of a limit order book, built on Preis, Golke, Paul & Schneider (2006),
 "Multi-agent-based Order Book Model of financial markets", *EPL* 75, 510. The paper is first
-reproduced as a validated baseline. The baseline is then used to study flash crashes: when a large
-sell order turns into a crash, and what stops it.
+reproduced as a validated baseline. The baseline is then used to study how a market recovers after
+a flash crash or flash rally, and the model is tested against real order book data.
 
 ## Status
 
 - **Phase 1 (done):** Figs. 2, 3 and 4 of the paper reproduced at paper scale (10⁶ steps, 50 runs
   per N_A). See [Results](#results). This version is tagged `baseline-v1`.
-- **Phase 2 (next):** add a large sell algorithm and a few intermediaries with inventory limits,
-  following Kirilenko et al. (2017) on the May 2010 Flash Crash. Then compare fast (HFT-like) and
-  slow (market-maker-like) intermediaries, and test interventions such as a trading pause.
-  See [docs/phase2_plan.md](docs/phase2_plan.md).
+- **Phase 2 (in progress):** recovery after a large order. Done so far: a shock test, orders
+  bigger than one unit, agents with different speeds and order sizes, and value traders, which make
+  the price recover. Next: tune the value traders, then set the model's parameters from E-mini
+  futures data and compare the model with it. See [docs/phase2_plan.md](docs/phase2_plan.md).
 
 Status and next steps are in [docs/project_plan.md](docs/project_plan.md). The reasoning behind
 each modelling and measurement choice is in [docs/decisions.md](docs/decisions.md). What the paper
@@ -181,8 +181,8 @@ python -m experiments.shock --provider-mix 4:250 --out results/shock_providers4.
 python -m experiments.shock --provider-mix 1:100 2:100 4:50 --out results/shock_mixed.png
 ```
 
-`--value-traders N` turns N of the 250 takers into value traders. Each has its own idea of the
-asset's value (the average recent price, plus or minus a personal shift), buys when the price is
+`--value-traders N` turns N of the 250 takers into value traders. Each has its own estimate of the
+asset's true value, which moves only with news (plus or minus a personal error), buys when the price is
 below it and sells when above. With them the price recovers after a shock:
 
 ```
@@ -191,7 +191,7 @@ python -m experiments.shock --value-traders 125 --out results/shock_value125.png
 
 ### Value trader sweep
 
-Tries 48 combinations of value trader settings (share of takers, window, mean shift), plus a control
+Tries 48 combinations of value trader settings (share of takers, amount of news, mean error), plus a control
 with none. Each combination gets a shock test and a long run without a shock, so that recovery speed
 can be set against how market-like the price is in normal times (`experiments/value_sweep.py`):
 

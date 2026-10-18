@@ -161,8 +161,9 @@ def test_bins_reach_far_enough_and_overflow_is_counted():
 def test_value_trader_settings_are_recorded_in_the_config():
     check("no value traders: recorded as None, as in files made before they existed",
           make_config(1000, {})["value_traders"] is None)
-    check("with value traders: their share, window and spread are recorded",
-          make_config(1000, {}, value=(0.2, 500, 30.0))["value_traders"] == {"fraction": 0.2, "window": 500, "spread": 30.0})
+    check("with value traders: their share, true value step and spread are recorded",
+          make_config(1000, {}, value=(0.2, 1.5, 30.0))["value_traders"]
+          == {"fraction": 0.2, "true_value_step": 1.5, "spread": 30.0})
 
 
 def same_run(a, b):
@@ -171,8 +172,8 @@ def same_run(a, b):
 
 def test_run_one_with_value_traders():
     plain = run_one((125, 0, 3_000, "symmetric", 0.0))
-    spelled_out = run_one((125, 0, 3_000, "symmetric", 0.0, (0.0, 777, 5.0)))
-    with_traders = run_one((125, 0, 3_000, "symmetric", 0.0, (0.4, 500, 30.0)))
+    spelled_out = run_one((125, 0, 3_000, "symmetric", 0.0, (0.0, 7.7, 5.0)))
+    with_traders = run_one((125, 0, 3_000, "symmetric", 0.0, (0.4, 1.0, 30.0)))
     check("a job without the value trader settings means none of them", same_run(plain, spelled_out))
     check("with 40% value traders the run is a different one", not same_run(plain, with_traders))
     check("and no market order went unfilled", with_traders["n_match_failures"] == 0)

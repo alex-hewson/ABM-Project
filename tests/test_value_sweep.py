@@ -38,7 +38,7 @@ def test_grid_has_a_control_and_every_combination_once():
     check("every combination appears exactly once", len(set(value_sweep.GRID[1:])) == 48)
     names = [value_sweep.name_of(i) for i in range(49)]
     check("every combination has its own file name", len(set(names)) == 49)
-    check("names say the settings", value_sweep.name_of(1) == "f0.02_w100_s50")
+    check("names say the settings", value_sweep.name_of(1) == "f0.02_news0.25_s50")
     check("shares become whole numbers of the shock test's 250 agents",
           [value_sweep.shock_traders(f) for f in value_sweep.FRACTIONS] == [5, 12, 25, 50])
 

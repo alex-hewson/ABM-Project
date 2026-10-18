@@ -5,8 +5,8 @@ normal times? (docs/validation.md, sections 10 and 11.)
 Every combination of three settings is tried (docs/decisions.md, D28):
 
     share of the takers that are value traders   2%, 5%, 10%, 20%
-    window of the reference price (steps)        100, 300, 1,000, 3,000
-    mean shift of a trader's own value (ticks)   50, 150, 500
+    news: how much the true value moves a step   0.25, 0.5, 1, 2 ticks (standard deviation)
+    mean error of a trader's own value (ticks)   50, 150, 500
 
 That is 48 combinations, plus a control with no value traders: 49 in all, numbered 0 (the control)
 to 48. Each one is two experiments:
@@ -43,9 +43,9 @@ from experiments import shock
 from experiments.plot import approximate_kurtosis, hurst_curves, hurst_near, mean_autocorrelation
 
 FRACTIONS = (0.02, 0.05, 0.1, 0.2)
-WINDOWS = (100, 300, 1000, 3000)
+NEWS = (0.25, 0.5, 1.0, 2.0)
 SPREADS = (50.0, 150.0, 500.0)
-GRID = [(0.0, 1000, 50.0)] + list(itertools.product(FRACTIONS, WINDOWS, SPREADS))   # entry 0: the control
+GRID = [(0.0, 1.0, 50.0)] + list(itertools.product(FRACTIONS, NEWS, SPREADS))   # entry 0: the control
 SHOCK_SIZES = (150, 300)
 NORMAL_AGENTS = 500              # the normal-times measures are read at this N_A
 HURST_LAGS = (10, 100, 1000, 10_000, 100_000)
@@ -53,8 +53,8 @@ OUT_DIR = runner.RESULTS_DIR / "value_sweep"
 
 
 def name_of(index: int) -> str:
-    fraction, window, spread = GRID[index]
-    return "control" if fraction == 0 else f"f{fraction:g}_w{window}_s{spread:g}"
+    fraction, news, spread = GRID[index]
+    return "control" if fraction == 0 else f"f{fraction:g}_news{news:g}_s{spread:g}"
 
 
 def shock_traders(fraction: float) -> int:
@@ -64,18 +64,18 @@ def shock_traders(fraction: float) -> int:
 
 def run_index(index: int, workers: int, n_steps: int, n_runs: int, shock_runs: int, shock_after: int,
               out_dir: Path) -> None:
-    fraction, window, spread = GRID[index]
+    fraction, news, spread = GRID[index]
     name = name_of(index)
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"combination {index}: {name}", flush=True)
 
     shock.main(["--sizes", "0", *map(str, SHOCK_SIZES), "--n-runs", str(shock_runs), "--after", str(shock_after),
-                "--value-traders", str(shock_traders(fraction)), "--value-window", str(window),
+                "--value-traders", str(shock_traders(fraction)), "--true-value-step", str(news),
                 "--value-spread", str(spread), "--workers", str(workers),
                 "--out", str(out_dir / f"shock_{name}.png")])
 
     # --resume: an interrupted job carries on, and a finished one is only saved again.
-    runner.main(["--value-fraction", str(fraction), "--value-window", str(window), "--value-spread", str(spread),
+    runner.main(["--value-fraction", str(fraction), "--true-value-step", str(news), "--value-spread", str(spread),
                  "--n-steps", str(n_steps), "--n-runs", str(n_runs), "--agent-counts", str(NORMAL_AGENTS),
                  "--workers", str(workers), "--resume", "--out", str(out_dir / f"normal_{name}.pkl")])
 
@@ -86,9 +86,9 @@ def summarise_index(index: int, out_dir: Path):
     shock_file, normal_file = out_dir / f"shock_{name}.pkl", out_dir / f"normal_{name}.pkl"
     if not (shock_file.exists() and normal_file.exists()):
         return None
-    fraction, window, spread = GRID[index]
+    fraction, news, spread = GRID[index]
     row = {"index": index, "name": name, "fraction": fraction,
-           "window": window if fraction else None, "spread": spread if fraction else None}
+           "news": news if fraction else None, "spread": spread if fraction else None}
 
     with open(shock_file, "rb") as f:
         shocked = pickle.load(f)
@@ -118,7 +118,7 @@ def plot_summary(rows, out: Path) -> None:
     finite = [r["half_life_300"] for r in done if r["half_life_300"] is not None]
     never = 2 * max(finite) if finite else 1000          # where "never recovers" is drawn
     markers = dict(zip(FRACTIONS, ("o", "s", "^", "D")))
-    colours = dict(zip(WINDOWS, ("C0", "C1", "C2", "C3")))
+    colours = dict(zip(NEWS, ("C0", "C1", "C2", "C3")))
     sizes = dict(zip(SPREADS, (25, 60, 120)))
 
     fig, axes = plt.subplots(1, 2, figsize=(15, 5.5))
@@ -127,7 +127,7 @@ def plot_summary(rows, out: Path) -> None:
             y = r["half_life_300"] if r["half_life_300"] is not None else never
             x = r[f"H({lag:g})"]
             if x is not None:
-                ax.scatter(x, max(y, 0.5), marker=markers[r["fraction"]], c=colours[r["window"]],
+                ax.scatter(x, max(y, 0.5), marker=markers[r["fraction"]], c=colours[r["news"]],
                            s=sizes[r["spread"]], alpha=0.8, edgecolors="k", linewidths=0.4)
         if control is not None and control[f"H({lag:g})"] is not None:
             ax.scatter(control[f"H({lag:g})"], never, marker="*", c="k", s=200, label="no value traders")
@@ -137,10 +137,10 @@ def plot_summary(rows, out: Path) -> None:
         ax.set(yscale="log", xlabel=f"H({lag:,}) without a shock (real markets: about 0.5)",
                ylabel="price half-life after a 300-unit sell [steps]",
                title=f"Recovery against H({lag:,})")
-    # Legend: marker = share, colour = window, size = spread.
+    # Legend: marker = share, colour = news, size = spread.
     handles = [plt.Line2D([], [], marker=markers[f], ls="", color="gray", label=f"{f:.0%} value traders") for f in FRACTIONS]
-    handles += [plt.Line2D([], [], marker="o", ls="", color=colours[w], label=f"window {w}") for w in WINDOWS]
-    handles += [plt.scatter([], [], s=sizes[s], c="white", edgecolors="k", label=f"mean shift {s:g}") for s in SPREADS]
+    handles += [plt.Line2D([], [], marker="o", ls="", color=colours[n], label=f"news {n:g}") for n in NEWS]
+    handles += [plt.scatter([], [], s=sizes[s], c="white", edgecolors="k", label=f"mean error {s:g}") for s in SPREADS]
     handles += [plt.Line2D([], [], marker="*", ls="", color="k", markersize=12, label="no value traders")]
     axes[1].legend(handles=handles, fontsize=7, loc="upper left", bbox_to_anchor=(1.02, 1))
     fig.suptitle("Value trader sweep: lower is faster recovery, nearer the dashed line is more market-like")
@@ -201,10 +201,10 @@ def main(argv=None):
 
     if args.command == "list":
         for index in range(len(GRID)):
-            fraction, window, spread = GRID[index]
+            fraction, news, spread = GRID[index]
             what = "no value traders" if fraction == 0 else (
                 f"{fraction:.0%} value traders ({shock_traders(fraction)} of 250 in the shock test), "
-                f"window {window}, mean shift {spread:g}")
+                f"news {news:g}, mean error {spread:g}")
             print(f"{index:3d}  {name_of(index):22}  {what}")
     elif args.command == "run":
         if not 0 <= args.index < len(GRID):

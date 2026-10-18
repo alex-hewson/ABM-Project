@@ -162,10 +162,11 @@ class LiquidityTaker:
 '''
 The value trader is the first agent that reacts to the market.
 
-It has its own idea of what the asset is worth: a reference price that every value trader shares (the
-simulation passes it in; it is the average of the recent mid-price) plus its own fixed shift. The shift
-is what makes the traders disagree: some put the value a little above the reference, some a little
-below, a few far from it.
+It has its own idea of what the asset is worth: the asset's true value, which every value trader
+estimates (the simulation passes it in as `reference`), plus the trader's own fixed error, its shift.
+The shift is what makes the traders disagree: some put the value a little above the true value, some a
+little below, a few far from it. The true value does not depend on the price; it only moves with news
+(see run_simulation), so a trader does not change its mind just because the price has moved.
 
 When its turn comes it compares its value with the current price:
     price below its value  -> the asset looks cheap, so it buys
@@ -174,14 +175,14 @@ It does this with a limit order AT its value, so it never pays more than it thin
 (or sells for less). If that price crosses the spread the order trades at once, like a market order;
 if not, it rests in the book at the trader's value.
 
-When the price is at the reference, about half of the traders want to buy and half want to sell, so
+When the price is at the true value, about half of the traders want to buy and half want to sell, so
 their orders balance. After a fall, traders whose value sat just below the old price now find the price
 below their value and switch from selling to buying. That is what pulls the price back.
 '''
 def draw_value_shift(rng: random.Random, spread: float) -> float:
-    """A trader's own shift from the shared reference price, in ticks: plus or minus with equal
+    """A trader's own error in estimating the true value, in ticks: plus or minus with equal
     chance, with a size drawn from an exponential distribution with mean `spread`. So most traders
-    sit close to the reference and a few sit far away. spread = 0 gives every trader a shift of 0."""
+    sit close to the true value and a few sit far away. spread = 0 gives every trader a shift of 0."""
     if spread == 0:
         return 0.0
     size = rng.expovariate(1.0 / spread)
@@ -206,7 +207,7 @@ def market_price(book: OrderBook, reference: float) -> float:
 class ValueTrader:
     agent_id: int
     mu: float          # probability of submitting an order on its step (the same rate as a taker)
-    shift: float       # its value is the shared reference price plus this many ticks (+ or -)
+    shift: float       # its value is the true value (`reference`) plus this many ticks (+ or -)
     interval: int = 1  # gets a chance to act every interval-th step (see AgentType)
     size: int = 1      # units per order
     offset: int = 0    # which of those steps: acts when (timestamp + offset) is a multiple of interval

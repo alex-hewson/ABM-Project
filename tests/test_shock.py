@@ -18,7 +18,7 @@ def check(label, condition):
 
 
 WARMUP, AFTER = 300, 250
-NO_VALUE_TRADERS = (0, 1000, 50.0)       # (how many, window, spread): none, so the last two are unused
+NO_VALUE_TRADERS = (0, 1.0, 50.0)        # (how many, true value step, spread): none, so the last two are unused
 
 
 def test_each_run_returns_one_window_per_quantity():
@@ -81,9 +81,9 @@ def test_a_run_with_slow_big_providers_supplies_the_same_volume():
 
 def test_a_run_with_value_traders_differs_only_by_having_them():
     plain = run_one((0, 3, WARMUP, AFTER, False, None, None, NO_VALUE_TRADERS))
-    again = run_one((0, 3, WARMUP, AFTER, False, None, None, (0, 77, 5.0)))
-    with_traders = run_one((0, 3, WARMUP, AFTER, False, None, None, (125, 100, 20.0)))
-    check("with 0 value traders the window and spread settings change nothing",
+    again = run_one((0, 3, WARMUP, AFTER, False, None, None, (0, 7.7, 5.0)))
+    with_traders = run_one((0, 3, WARMUP, AFTER, False, None, None, (125, 1.0, 20.0)))
+    check("with 0 value traders the true value step and spread settings change nothing",
           all(np.array_equal(plain[q], again[q]) for q in QUANTITIES))
     check("with 125 value traders the run is a different one", not np.array_equal(plain["spread"], with_traders["spread"]))
     check("and the book still has both sides throughout", np.all(with_traders["spread"] > 0))

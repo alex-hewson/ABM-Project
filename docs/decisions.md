@@ -183,11 +183,10 @@ hold, counted in units.
 **D28. Value traders: the first agents that react to the market. [Assumed, Checked]**
 Added because agents that ignore the market cannot make the price recover (`validation.md`,
 sections 8 and 9).
-- All value traders share a reference price: the mean of the mid-price over the last W steps
-  (W = 1000 by default). Until there is any history it is the start price.
-- Each trader's own value is the reference plus a fixed shift. The shift is + or − with equal
-  chance, with a size drawn from an exponential distribution (mean 50 ticks by default). So the
-  traders disagree about the value: most are near the reference, a few are far from it.
+- All value traders estimate the asset's true value (D30).
+- Each trader's own value is the true value plus a fixed error (its shift). The error is + or − with
+  equal chance, with a size drawn from an exponential distribution (mean 50 ticks by default). So
+  the traders disagree about the value: most are near the true value, a few are far from it.
 - On its turn a trader compares its value with the midpoint. Price below its value: it buys.
   Price above: it sells.
 - It uses a limit order at its value, rounded so that it never trades at a worse price than its
@@ -196,8 +195,24 @@ sections 8 and 9).
   orders per step is unchanged. Takers and value traders act in one random order within a step.
 - A trader keeps its shift for the whole run.
 
-The defaults (W = 1000, mean shift 50 ticks) are placeholders, not fitted to anything. With no
-value traders the model is exactly the baseline (D23).
+The defaults (mean error 50 ticks, and news of 1 tick per step in D30) are placeholders, not fitted
+to anything. With no value traders the model is exactly the baseline (D23).
+
+**D30. The true value: a random walk driven by news. [Assumed, Checked]**
+- It starts at the midpoint at the end of the pre-opening. Each step it moves by a random step from a
+  normal distribution, with a standard deviation of 1 tick by default ("news"). It does not depend on
+  the price.
+- Why: the first version used a moving average of the price as the reference, so each trader's value
+  followed the price. A trader that started bullish stayed bullish whatever the price did. When the
+  shifts did not balance, the price ran away from its own average: a drift of 10–48 ticks per 1,000
+  steps, in the direction of the traders' middle shift (`validation.md`, section 12). A real value
+  investor does not change its valuation just because the price has moved.
+- The price now sits a fixed distance from the true value, about the traders' middle error, where
+  buyers and sellers balance. It does not drift away.
+- **Consequence:** over long times the price follows the true value, so its long-run random walk is
+  an input (the amount of news), not a result of the order book. Results at long lags (e.g. H close
+  to 0.5) cannot count as evidence. Shorter times, and the recovery after a shock, are still the
+  order book's own. The news step is to be set from the long-run volatility of real data.
 
 ---
 
@@ -206,10 +221,15 @@ value traders the model is exactly the baseline (D23).
 - **Depth-profile fit (D14):** whether the paper fits each side separately or combined.
 - **Asymmetric flow (D16, D18):** the q_provider variant the paper mentions, and whether mirror vs
   blocked reflection matters.
-- **Value trader settings (D28).** How many there are, the window W and the size of the shifts are
-  not fitted to anything yet. They are to be set from real order book data.
-- **Side effect of value traders.** At the default settings they hold the price too close to its
-  recent average: H falls far below 0.5 and the trend of Figs. 3–4 disappears (`validation.md`,
-  section 11). Settings that give recovery without this have not been found yet.
+- **Value trader settings (D28, D30).** How many there are, the size of their errors and the amount
+  of news are not fitted to anything yet. They are to be set from real order book data.
+- **Fat tails in the new model.** The basic model has none (kurtosis about 3, a Gaussian), with or
+  without value traders. In Phase 1 they only came from Eq. 4, which depends on the trend in the
+  takers' buy probability. Real markets have them, so the E-mini comparison will need a source of fat
+  tails, e.g. providers that place orders further away when recent volatility is high. The true value
+  design has not been tried in the Fig. 4 model yet.
+- **Where the order book hands over to news.** Up to some time scale the price's randomness is the
+  order book's own; beyond it, it follows the true value. Where that happens, and whether it matches
+  real data, has not been measured.
 - **Which mixes of agent types to compare,** and whether speed and size should also be varied
   separately (e.g. unit orders every 4 steps).

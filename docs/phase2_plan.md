@@ -1,34 +1,49 @@
 # Phase 2 Plan (draft)
 
-Rough plan for after the baseline model. To discuss with supervisors.
+Rough plan for the rest of the project. To discuss with supervisors.
 
 ## Idea
 
-Kirilenko et al. (2017) found that HFTs did not cause the Flash Crash, but could not absorb the
-large sell order either. Intermediaries only held a few thousand contracts at most, while the sell
-algorithm was selling 75,000.
+Study how a market recovers after a flash crash or flash rally, not what causes it. The cause is
+taken to be a large order.
 
-Question: when does a large sell order turn into a flash crash in the Preis model, and what stops it?
+In the base model the price never recovers after a large order. Nothing pulls it back, and the book
+refills at a rate set only by the cancellation rate. So agents that react to the market are needed.
+
+The model is to be validated on real order book data from a traditional market (E-mini futures)
+first. Crypto or prediction markets only if there is time.
+
+## Done so far
+
+- Shock test: one large market order, then the price, spread and book are recorded as it recovers.
+- Orders bigger than one unit.
+- Agents with different speeds and order sizes (1 unit every step, 2 every 2, 4 every 4). Each type
+  trades the same volume. On their own they do not change the average recovery.
+- Value traders, which buy below their own idea of the value and sell above it. With them the price
+  recovers. At the first settings tried, they also hold the price too still in normal times.
 
 ## Steps
 
-1. Add one large seller to the baseline. Compare selling at a fixed rate with selling a share of
-   recent volume (like the May 2010 algorithm).
-2. Add a few intermediaries with inventory limits. Vary the seller's size against the
-   intermediaries' capacity.
-3. Compare fast (HFT-like) and slow (market-maker-like) intermediaries.
-4. Test interventions, e.g. a trading pause like the 5-second one on May 6.
+1. Sweep the value trader settings (how many, how long their memory, how far apart their values)
+   to find settings that give recovery without holding the price still. Running on the cluster.
+2. E-mini data: measure order arrival and cancellation rates, order sizes, the spread and the depth
+   of the book, and set the model's parameters from them. Then find large orders in the data and
+   measure how the real book recovers after them.
+3. Compare the model with the data: recovery after large orders, plus spread, volatility and the
+   return distribution.
+4. Fast and slow value traders. Maybe a market maker with an inventory limit.
+5. If time allows: crypto or prediction markets, and interventions such as a trading pause.
 
-Each step should give a result on its own, so the project can stop after any of them if time runs
-short. Rough timing: steps 1–2 by Christmas, steps 3–4 by the end of February, then write-up.
+Each step should give a result on its own. Rough timing: steps 1–3 by Christmas, step 4 by the end
+of February, then write-up.
 
 ## Unsure about
 
-- How to define a crash. A percentage drop doesn't really work, since the price starts at 10⁶ ticks.
-  Maybe relative to normal volatility instead?
-- How to turn simulation steps into real time (the algorithm sold 9% of the last minute's volume).
-- How the intermediaries should decide when to trade. Paddrik et al.'s position-limit rule is one
-  option.
+- What the data contains: its form, dates, and the rules for using it.
+- How to turn simulation steps into real time.
+- What "recovery" should mean: the price coming back, the book refilling, or both. And how to
+  measure it in real data.
+- Whether value traders can give recovery without making the price too still.
 
 ## Not planned
 
@@ -36,8 +51,9 @@ Herding traders (Novotny 2026; Lux & Marchesi 1999). Maybe at the end if there i
 
 ## Main references
 
+- Preis, Golke, Paul & Schneider (2006), Multi-agent-based Order Book Model of financial markets,
+  EPL.
 - Kirilenko, Kyle, Samadi & Tuzun (2017), The Flash Crash: High-Frequency Trading in an Electronic
   Market, Journal of Finance.
-- Paddrik, Hayes, Scherer & Beling (2014), OFR Working Paper 14-09.
-- Jacob Leal, Napoletano, Roventini & Fagiolo (2016), Rock around the clock, Journal of
-  Evolutionary Economics.
+- Farmer, Patelli & Zovko (2005), The predictive power of zero intelligence in financial markets,
+  PNAS. An example of testing an order book model against real data.

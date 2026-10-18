@@ -14,7 +14,8 @@ lambda(t) = lambda_0 (1 + |q(t) - 1/2| / sqrt(<(q - 1/2)^2>) * C), for Fig. 4 (p
 
 --value-fraction F turns that share of the takers into value traders (abm/agents.py, ValueTrader;
 docs/decisions.md, D28), e.g. 0.2 gives 25, 50 and 100 of them for N_A = 125, 250 and 500.
---value-window and --value-spread set their reference window and how far apart their values are.
+--true-value-step sets how much the true value they estimate moves each step (news), and
+--value-spread how far apart their estimates are (docs/decisions.md, D30).
 
 Each flow is a separate experiment with its own results file. Every run stores:
     - RMS price change at ~80 lags from 1 to n_steps/10, for all five price definitions in
@@ -113,12 +114,12 @@ def describe_entry_depth(flow_name: str, depth_coupling: float) -> Optional[dict
     return {"c_lambda": depth_coupling, "lambda_0": PARAMS["lambda_"], "q_rms": flow.stationary_rms}
 
 
-def describe_value_traders(fraction: float, window: int, spread: float) -> Optional[dict]:
+def describe_value_traders(fraction: float, true_value_step: float, spread: float) -> Optional[dict]:
     """The value trader settings, as saved in the results file (None when there are none, which
     keeps those files identical in format to ones made before value traders were added)."""
     if fraction == 0:
         return None
-    return {"fraction": fraction, "window": window, "spread": spread}
+    return {"fraction": fraction, "true_value_step": true_value_step, "spread": spread}
 
 
 def make_bin_edges(grid_step: float, min_ticks: float = 1.0, max_ticks: float = 50_000.0,
@@ -150,10 +151,10 @@ RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
 def run_one(job):
     """One independent simulation, reduced to the quantities the figures need.
     job = (n_agents, seed, n_steps, flow name, depth coupling C_lambda, value traders).
-    value traders = (share of the takers, reference window, mean shift). It can be left off the
+    value traders = (share of the takers, true value step, mean shift). It can be left off the
     job, which means none."""
     n_agents, seed, n_steps, flow_name, depth_coupling, *rest = job
-    value_fraction, value_window, value_spread = rest[0] if rest else (0.0, 1000, 50.0)
+    value_fraction, true_value_step, value_spread = rest[0] if rest else (0.0, 1.0, 50.0)
     flow = make_flow(flow_name)                 # fresh for this run
     q_rms = flow.stationary_rms if depth_coupling > 0 else None      # Eq. 4's sqrt(<(q - 1/2)^2>)
     record_depth = n_agents == DEPTH_AGENTS
@@ -166,7 +167,7 @@ def run_one(job):
         depth_coupling=depth_coupling,
         q_rms=q_rms,
         n_value_traders=round(value_fraction * n_agents),
-        value_window=value_window,
+        true_value_step=true_value_step,
         value_spread=value_spread,
         **PARAMS,
     )
@@ -226,9 +227,9 @@ CHECKED_SETTINGS = ("format", "n_steps", "params", "return_bin_edges", "depth_wi
 
 
 def make_config(n_steps: int, git: dict, flow_name: str = "symmetric", depth_coupling: float = 0.0,
-                value: tuple = (0.0, 1000, 50.0)) -> dict:
+                value: tuple = (0.0, 1.0, 50.0)) -> dict:
     """The settings that define an experiment; saved with the results and checked on --resume.
-    value = (share of the takers that are value traders, reference window, mean shift)."""
+    value = (share of the takers that are value traders, true value step, mean shift)."""
     return {"format": RESULTS_FORMAT, "n_steps": n_steps, "params": PARAMS,
             "return_bin_edges": RETURN_BIN_EDGES, "depth_window": DEPTH_WINDOW,
             "price_definitions": PRICE_DEFINITIONS, "lag_points": LAG_POINTS,
@@ -246,10 +247,10 @@ def main(argv=None):
                         help="C_lambda in Eq. 4 (Fig. 4: 10); needs --flow mean-reverting. Default 0: fixed depth")
     parser.add_argument("--value-fraction", type=float, default=0.0,
                         help="share of the takers that are value traders, 0 to 1 (default 0: none)")
-    parser.add_argument("--value-window", type=int, default=1000,
-                        help="steps of past mid-prices in the value traders' reference price (default 1000)")
+    parser.add_argument("--true-value-step", type=float, default=1.0,
+                        help="how much the true value moves each step: the standard deviation, in ticks (default 1)")
     parser.add_argument("--value-spread", type=float, default=50.0,
-                        help="mean distance of a value trader's own value from the reference, in ticks (default 50)")
+                        help="mean distance of a value trader's own value from the true value, in ticks (default 50)")
     parser.add_argument("--n-steps", type=int, default=1_000_000)
     parser.add_argument("--n-runs", type=int, default=50, help="runs per N_A")
     parser.add_argument("--agent-counts", type=int, nargs="+", default=list(AGENT_COUNTS),
@@ -269,7 +270,7 @@ def main(argv=None):
                          "mean-reverting walk, and its sqrt(<(q - 1/2)^2>) is derived for that walk (D19)")
     if not (0 <= args.value_fraction <= 1):
         raise SystemExit("--value-fraction must be between 0 and 1")
-    value = (args.value_fraction, args.value_window, args.value_spread)
+    value = (args.value_fraction, args.true_value_step, args.value_spread)
     if args.out is None:
         suffix = f"_c{args.depth_coupling:g}" if args.depth_coupling > 0 else ""
         suffix += f"_v{args.value_fraction:g}" if args.value_fraction > 0 else ""
@@ -329,7 +330,7 @@ def main(argv=None):
           f"* {depth['c_lambda']:g})")
     traders = config["value_traders"]
     print("value traders: none" if traders is None else
-          f"value traders: {traders['fraction']:.0%} of the takers (window {traders['window']}, "
+          f"value traders: {traders['fraction']:.0%} of the takers (true value step {traders['true_value_step']:g}, "
           f"mean shift {traders['spread']:g} ticks)")
     print(f"{len(all_keys)} runs ({args.n_runs} per N_A in {tuple(args.agent_counts)}), {args.n_steps:,} steps each, "
           f"{args.workers} workers")

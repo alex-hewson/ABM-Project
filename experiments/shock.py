@@ -23,9 +23,10 @@ INTERVAL/SIZE:COUNT sets the two separately, e.g. 4/1:250 for unit orders every 
 these options every agent is the paper's (1:250).
 
 --value-traders N turns N of the 250 takers into value traders (abm/agents.py, ValueTrader), which
-buy when the price is below their own value and sell when it is above. --value-window sets how many
-steps of past prices their shared reference price averages over, and --value-spread how far apart
-their own values are (mean shift from the reference, in ticks):
+buy when the price is below their own value and sell when it is above. Their values are estimates of
+the asset's true value, which only moves with news (docs/decisions.md, D30). --true-value-step sets
+how much it moves each step, and --value-spread how far apart the traders' estimates are (mean error,
+in ticks):
 
     python -m experiments.shock --value-traders 125 --out results/shock_value125.png
 
@@ -99,11 +100,11 @@ def describe_mix(mix, n_agents=N_AGENTS):
 def run_one(task):
     """One run: returns the window around the shock for each recorded quantity."""
     size, seed, warmup, after, buy, provider_mix, taker_mix, value = task
-    n_value_traders, value_window, value_spread = value
+    n_value_traders, true_value_step, value_spread = value
     shock = Shock(step=warmup, size=size, side=Side.BID if buy else Side.ASK) if size > 0 else None
     r = run_simulation(n_agents=N_AGENTS, n_steps=warmup + after + 1, seed=seed, shock=shock,
                        record_sides=True, keep_trades=False, provider_mix=provider_mix, taker_mix=taker_mix,
-                       n_value_traders=n_value_traders, value_window=value_window, value_spread=value_spread,
+                       n_value_traders=n_value_traders, true_value_step=true_value_step, value_spread=value_spread,
                        **PARAMS)
     mid = window(r.mid_price_series, warmup, BEFORE, after)
     return {
@@ -196,10 +197,10 @@ def main(argv=None):
                         help="taker types, in the same form (default: all 1:250)")
     parser.add_argument("--value-traders", type=int, default=0,
                         help="how many of the 250 takers are value traders (default 0)")
-    parser.add_argument("--value-window", type=int, default=1000,
-                        help="steps of past mid-prices in the value traders' reference price (default 1000)")
+    parser.add_argument("--true-value-step", type=float, default=1.0,
+                        help="how much the true value moves each step: the standard deviation, in ticks (default 1)")
     parser.add_argument("--value-spread", type=float, default=50.0,
-                        help="mean distance of a value trader's own value from the reference, in ticks (default 50)")
+                        help="mean distance of a value trader's own value from the true value, in ticks (default 50)")
     parser.add_argument("--workers", type=int, default=None, help="processes to use (default: all cores)")
     parser.add_argument("--out", type=Path, default=Path("results/shock_test.png"))
     args = parser.parse_args(argv)
@@ -216,7 +217,7 @@ def main(argv=None):
     for name, mix, total in (("--provider-mix", provider_mix, N_AGENTS), ("--taker-mix", taker_mix, n_takers)):
         if mix is not None and sum(mix.values()) != total:
             parser.error(f"{name}: the counts must add up to {total}, got {sum(mix.values())}")
-    value = (args.value_traders, args.value_window, args.value_spread)
+    value = (args.value_traders, args.true_value_step, args.value_spread)
 
     sizes = sorted(set(args.sizes))
     tasks = [(size, seed, args.warmup, args.after, args.buy, provider_mix, taker_mix, value)
@@ -225,9 +226,9 @@ def main(argv=None):
                   n_agents=N_AGENTS, params=PARAMS, git=git_info(),
                   providers=describe_mix(provider_mix), takers=describe_mix(taker_mix, n_takers),
                   provider_mix=provider_mix, taker_mix=taker_mix,
-                  n_value_traders=args.value_traders, value_window=args.value_window,
+                  n_value_traders=args.value_traders, true_value_step=args.true_value_step,
                   value_spread=args.value_spread,
-                  value_traders=f"{args.value_traders} value traders (window {args.value_window}, "
+                  value_traders=f"{args.value_traders} value traders (true value step {args.true_value_step:g}, "
                                 f"spread {args.value_spread:g})")
     print(f"{len(tasks)} runs: sizes {sizes}, {args.n_runs} runs each, code version {describe(config['git'])}\n"
           f"providers: {config['providers']}\ntakers:    {config['takers']}"
