@@ -148,6 +148,9 @@ numbers, so a run with a shock is identical to the run without it up to that ste
 - Impact = value at the shock step minus the level before.
 - Share recovered = how much of the impact is undone by the end (mean of the last 200 steps).
 - Half-life = steps until half of the impact is undone.
+- With value traders, the price is measured relative to the true value (D30): mid-price minus true
+  value. The true value keeps moving with news after the shock, which only adds noise to the plain
+  price. Without value traders there is no true value, and the plain price is used.
 
 **D26. Orders bigger than one unit. [Assumed]**
 The paper only has unit orders (P4), so all of this is added:

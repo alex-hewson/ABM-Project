@@ -35,6 +35,13 @@ Recorded each step and averaged over runs:
     spread   best ask minus best bid
     volume   number of resting units on each side of the book (= number of orders while every
              order is one unit)
+    price_vs_value
+             the mid-price minus the true value (docs/decisions.md, D30), as a change since the step
+             before the shock. The true value keeps moving with news after the shock, which adds
+             noise to the plain price; this takes it out, so it measures whether the price has gone
+             back to what the asset is worth. Without value traders there is no true value, and
+             this is the same as the price change. Recovery (the summary table, panels (a) and (b))
+             is measured on this.
 
 The figure is saved to --out, and the averaged curves to the same name with .pkl. A summary table
 (impact, share recovered, recovery times; see analysis/recovery.py) is printed.
@@ -63,7 +70,7 @@ from experiments.run import PARAMS
 N_AGENTS = 250
 BEFORE = 200          # steps shown (and averaged for the "before" level) ahead of the shock
 TAIL = 200            # the "end" level is the mean of this many final steps
-QUANTITIES = ("price", "spread", "bid_volume", "ask_volume")
+QUANTITIES = ("price", "price_vs_value", "spread", "bid_volume", "ask_volume")
 
 
 def parse_mix(items):
@@ -107,9 +114,16 @@ def run_one(task):
                        n_value_traders=n_value_traders, true_value_step=true_value_step, value_spread=value_spread,
                        **PARAMS)
     mid = window(r.mid_price_series, warmup, BEFORE, after)
+    price = mid - mid[BEFORE - 1]                # change since the step before the shock
+    if n_value_traders:
+        gap = mid - window(r.true_value_series, warmup, BEFORE, after)
+        price_vs_value = gap - gap[BEFORE - 1]
+    else:
+        price_vs_value = price                   # no true value: as if it never moved
     return {
         "size": size,
-        "price": mid - mid[BEFORE - 1],          # change since the step before the shock
+        "price": price,
+        "price_vs_value": price_vs_value,
         "spread": window(r.best_ask_series - r.best_bid_series, warmup, BEFORE, after),
         "bid_volume": window(r.bid_volume_series, warmup, BEFORE, after),
         "ask_volume": window(r.ask_volume_series, warmup, BEFORE, after),
@@ -120,25 +134,25 @@ def run_one(task):
 def summarise(means, sizes, buy):
     """Print, for each shock size, what the shock did and how much of it was undone."""
     hit_side = "ask_volume" if buy else "bid_volume"
-    print(f"\n{'size':>5} | {'price: impact':>13} {'end':>7} {'recovered':>9} {'half-life':>9} | "
+    print(f"\n{'size':>5} | {'price*: impact':>14} {'end':>7} {'recovered':>9} {'half-life':>9} | "
           f"{'spread: before':>14} {'at shock':>8} {'half-life':>9} | "
           f"{'volume: before':>14} {'at shock':>8} {'half-life':>9} {'90% back':>8}")
     for size in sizes:
         m = means[size]
         if size == 0:
-            print(f"{size:>5} | {'(control)':>13} {np.mean(m['price'][-TAIL:]):>7.1f}")
+            print(f"{size:>5} | {'(control)':>14} {np.mean(m['price_vs_value'][-TAIL:]):>7.1f}")
             continue
-        price, spread, volume = m["price"], m["spread"], m[hit_side]
+        price, spread, volume = m["price_vs_value"], m["spread"], m[hit_side]
         def steps(x):
             return "never" if x is None else str(x)
-        print(f"{size:>5} | {impact(price, BEFORE):>13.1f} {np.mean(price[-TAIL:]):>7.1f} "
+        print(f"{size:>5} | {impact(price, BEFORE):>14.1f} {np.mean(price[-TAIL:]):>7.1f} "
               f"{recovered_fraction(price, BEFORE, TAIL):>9.2f} {steps(time_to_recover(price, BEFORE)):>9} | "
               f"{pre_shock_level(spread, BEFORE):>14.1f} {spread[BEFORE]:>8.1f} {steps(time_to_recover(spread, BEFORE)):>9} | "
               f"{pre_shock_level(volume, BEFORE):>14.0f} {volume[BEFORE]:>8.0f} {steps(time_to_recover(volume, BEFORE)):>9} "
               f"{steps(time_to_recover(volume, BEFORE, 0.9)):>8}")
-    print("\nprice in ticks; volume = resting units on the side the shock hit; "
-          "'recovered' = share of the price move undone by the end "
-          "(1 = back to the old price, 0 = none);\nhalf-life and '90% back' in steps after the shock.")
+    print("\nprice* = mid-price minus the true value (just the price without value traders), in ticks; "
+          "volume = resting units\non the side the shock hit; 'recovered' = share of the price* move undone by "
+          "the end (1 = all, 0 = none);\nhalf-life and '90% back' in steps after the shock.")
 
 
 def plot(means, sizes, config, out):
@@ -152,14 +166,14 @@ def plot(means, sizes, config, out):
         m, c = means[size], f"C{colour}"
         label = "no shock" if size == 0 else f"size {size}"
         ax_price.plot(t, m["price"], color=c, lw=0.9, label=label)
-        ax_zoom.plot(t, m["price"], color=c, lw=0.9, label=label)
+        ax_zoom.plot(t, m["price_vs_value"], color=c, lw=0.9, label=label)
         ax_spread.plot(t, m["spread"], color=c, lw=0.9, label=label)
         ax_volume.plot(t, m["bid_volume"], color=c, lw=0.9, label=f"{label}: bids")
         ax_volume.plot(t, m["ask_volume"], color=c, lw=0.9, ls="--", label=f"{label}: asks")
 
     ax_price.set(title="(a) mid-price change", xlabel="steps since the shock", ylabel="price change [ticks]")
-    ax_zoom.set(title="(b) mid-price change, first 300 steps", xlabel="steps since the shock",
-                ylabel="price change [ticks]", xlim=(-30, 300))
+    ax_zoom.set(title="(b) mid-price minus true value: what recovery is measured on",
+                xlabel="steps since the shock", ylabel="change [ticks]")
     ax_spread.set(title="(c) spread", xlabel="steps since the shock", ylabel="spread [ticks]", xlim=(-30, 300))
     ax_volume.set(title="(d) resting units per side (solid: bids, dashed: asks)",
                   xlabel="steps since the shock", ylabel="units", xlim=(-30, 300))

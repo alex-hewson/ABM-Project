@@ -19,7 +19,8 @@ to 48. Each one is two experiments:
     python -m experiments.value_sweep run --index 7        # run combination 7 (both experiments)
     python -m experiments.value_sweep collect              # table + figure from whatever has finished
 
-`run` is meant for a cluster job array, one combination per job (cluster/value_sweep.slurm). Results
+`run` is meant for a cluster job array, one combination per job (cluster/value_sweep.slurm).
+`run --shock-only` redoes just the shock test, which takes about a minute instead of 15. Results
 go to results/value_sweep/. Running the same index again picks up where it stopped. `collect` can be
 run at any time; combinations that have not finished are listed as missing.
 """
@@ -63,7 +64,7 @@ def shock_traders(fraction: float) -> int:
 
 
 def run_index(index: int, workers: int, n_steps: int, n_runs: int, shock_runs: int, shock_after: int,
-              out_dir: Path) -> None:
+              out_dir: Path, shock_only: bool = False) -> None:
     fraction, news, spread = GRID[index]
     name = name_of(index)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -73,6 +74,8 @@ def run_index(index: int, workers: int, n_steps: int, n_runs: int, shock_runs: i
                 "--value-traders", str(shock_traders(fraction)), "--true-value-step", str(news),
                 "--value-spread", str(spread), "--workers", str(workers),
                 "--out", str(out_dir / f"shock_{name}.png")])
+    if shock_only:
+        return
 
     # --resume: an interrupted job carries on, and a finished one is only saved again.
     runner.main(["--value-fraction", str(fraction), "--true-value-step", str(news), "--value-spread", str(spread),
@@ -93,7 +96,8 @@ def summarise_index(index: int, out_dir: Path):
     with open(shock_file, "rb") as f:
         shocked = pickle.load(f)
     for size in SHOCK_SIZES:
-        price = shocked["means"][size]["price"]
+        means = shocked["means"][size]
+        price = means.get("price_vs_value", means["price"])   # price relative to the true value
         row[f"half_life_{size}"] = time_to_recover(price, shock.BEFORE)
         row[f"recovered_{size}"] = recovered_fraction(price, shock.BEFORE, shock.TAIL)
 
@@ -195,6 +199,8 @@ def main(argv=None):
     run_cmd.add_argument("--n-runs", type=int, default=16, help="normal-times runs (default 16)")
     run_cmd.add_argument("--shock-runs", type=int, default=200, help="shock runs per size (default 200)")
     run_cmd.add_argument("--shock-after", type=int, default=2000, help="steps recorded after each shock (default 2000)")
+    run_cmd.add_argument("--shock-only", action="store_true",
+                         help="run only the shock test (e.g. to redo it after a change to how recovery is measured)")
     for sub in (run_cmd, commands.add_parser("collect", help="summary table and figure")):
         sub.add_argument("--out-dir", type=Path, default=OUT_DIR)
     args = parser.parse_args(argv)
@@ -209,7 +215,8 @@ def main(argv=None):
     elif args.command == "run":
         if not 0 <= args.index < len(GRID):
             parser.error(f"--index must be 0 to {len(GRID) - 1}")
-        run_index(args.index, args.workers, args.n_steps, args.n_runs, args.shock_runs, args.shock_after, args.out_dir)
+        run_index(args.index, args.workers, args.n_steps, args.n_runs, args.shock_runs, args.shock_after, args.out_dir,
+                  args.shock_only)
     else:
         collect(args.out_dir)
 

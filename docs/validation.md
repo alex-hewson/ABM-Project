@@ -366,3 +366,10 @@ value moved by the same amount to within 0.7 ticks per 1,000 steps.
   side effects of the first design (section 11) are gone. Note that 1 tick of news per step was chosen
   to give about the same long-run wandering as the basic model, so the long-lag values are partly an
   input (D30).
+
+**Recovery measured relative to the true value (D25).** With news, the true value keeps moving after
+the shock and adds noise to the plain price. Checked on 5% value traders (12 of 250), news 2 ticks per
+step, mean error 50, 200 runs: on the plain price the half-lives were 199 steps (150-unit order) and
+842 steps (300-unit order); relative to the true value they are 195 and 490. The plain-price numbers
+are exactly those of the cluster run of the same setting, so the laptop and the cluster give the same
+results.

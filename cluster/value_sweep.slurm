@@ -26,4 +26,6 @@
 
 # Which Python the job is using, so the log shows it.
 echo "node: $(hostname)   python: $(command -v python)   $(python --version 2>&1)"
-python -u -m experiments.value_sweep run --index "$SLURM_ARRAY_TASK_ID" --workers "$SLURM_CPUS_PER_TASK"
+# Extra options for `run` can be passed in SWEEP_ARGS, e.g. to redo only the shock tests:
+#     SWEEP_ARGS=--shock-only sbatch --cpus-per-task=16 --time=00:15:00 cluster/value_sweep.slurm
+python -u -m experiments.value_sweep run --index "$SLURM_ARRAY_TASK_ID" --workers "$SLURM_CPUS_PER_TASK" ${SWEEP_ARGS:-}

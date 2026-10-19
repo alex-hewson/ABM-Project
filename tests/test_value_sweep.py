@@ -71,6 +71,12 @@ def test_run_and_collect_end_to_end():
         _, error = quietly(value_sweep.main, ["run", "--index", "23", *tiny])
         check("running a finished combination again is harmless", error is None)
 
+        normal_file = Path(tmp) / f"normal_{name}.pkl"
+        before = normal_file.stat().st_mtime_ns
+        _, error = quietly(value_sweep.main, ["run", "--index", "23", "--shock-only", *tiny])
+        check("--shock-only redoes the shock test and leaves the long run alone",
+              error is None and normal_file.stat().st_mtime_ns == before)
+
         text, error = quietly(value_sweep.main, ["collect", "--out-dir", tmp])
         check("collect works on a partly finished sweep", error is None)
         check("it lists the 47 combinations still missing", "47 of 49 combinations have not finished" in text)

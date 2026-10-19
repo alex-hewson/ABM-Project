@@ -79,6 +79,18 @@ def test_a_run_with_slow_big_providers_supplies_the_same_volume():
           abs(slow_volume - plain_volume) < 0.06 * plain_volume)
 
 
+def test_price_relative_to_the_true_value():
+    plain = run_one((300, 3, WARMUP, AFTER, False, None, None, NO_VALUE_TRADERS))
+    check("without value traders it is just the price change", np.array_equal(plain["price_vs_value"], plain["price"]))
+    no_news = run_one((300, 3, WARMUP, AFTER, False, None, None, (50, 0.0, 50.0)))
+    check("with value traders but no news the true value never moves, so it is again the price change",
+          np.allclose(no_news["price_vs_value"], no_news["price"]))
+    news = run_one((300, 3, WARMUP, AFTER, False, None, None, (50, 2.0, 50.0)))
+    check("with news it differs from the plain price change", not np.allclose(news["price_vs_value"], news["price"]))
+    check("both are measured from the step before the shock",
+          news["price_vs_value"][BEFORE - 1] == 0 and news["price"][BEFORE - 1] == 0)
+
+
 def test_a_run_with_value_traders_differs_only_by_having_them():
     plain = run_one((0, 3, WARMUP, AFTER, False, None, None, NO_VALUE_TRADERS))
     again = run_one((0, 3, WARMUP, AFTER, False, None, None, (0, 7.7, 5.0)))
