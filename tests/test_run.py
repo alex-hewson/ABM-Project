@@ -9,6 +9,8 @@ definitions (docs/decisions.md, D15).
 
 import numpy as np
 
+from abm.agents import AgentType
+from experiments.run import split_into_types
 from experiments.run import (make_bin_edges, make_flow, describe_flow, make_config, run_one,
                              RETURN_BIN_EDGES, PRICE_DEFINITIONS, FLOWS)
 from abm.buy_probability import BoundedRandomWalk, MeanRevertingWalk
@@ -189,6 +191,27 @@ def test_autocorrelations_are_stored_for_every_price_definition():
           all(np.all(np.abs(v[kind]) <= 1) for v in r["autocorr"].values() for kind in ("signed", "absolute")))
     tiny = run_one((125, 0, 150, "symmetric", 0.0))
     check("a run too short for even one lag stores none, without failing", tiny["autocorr"] == {})
+
+
+def test_agents_are_split_equally_between_the_types_listed():
+    check("no types: the paper's agents", split_into_types((), 500) is None and split_into_types(None, 500) is None)
+    check("one type: every agent", split_into_types((4,), 500) == {AgentType(4, 4): 500})
+    check("three types share 500 as 167, 167, 166",
+          split_into_types((1, 2, 4), 500) == {AgentType(1, 1): 167, AgentType(2, 2): 167, AgentType(4, 4): 166})
+    check("agent types are recorded in the config, None when not used",
+          make_config(1000, {})["agent_types"] is None
+          and make_config(1000, {}, types=((), (4,)))["agent_types"] == {"providers": [1], "takers": [4]})
+
+
+def test_run_one_with_agent_types():
+    plain = run_one((125, 0, 3_000, "symmetric", 0.0))
+    spelled_out = run_one((125, 0, 3_000, "symmetric", 0.0, (0.0, 1.0, 50.0), ((1,), (1,))))
+    lumpy = run_one((125, 0, 3_000, "symmetric", 0.0, (0.0, 1.0, 50.0), ((), (4,))))
+    check("type 1 written out is the paper's population", same_run(plain, spelled_out))
+    check("4-unit takers every 4 steps give a different run", not same_run(plain, lumpy))
+    check("and every market order was filled", lumpy["n_match_failures"] == 0)
+    mixed = run_one((125, 0, 3_000, "symmetric", 0.0, (0.4, 1.0, 50.0), ((2,), (4,))))
+    check("agent types and value traders can be combined", mixed["n_match_failures"] == 0)
 
 
 if __name__ == "__main__":

@@ -159,6 +159,14 @@ The comparison shows the Hurst exponent, one return distribution, and the autoco
 changes and of their size (volatility clustering), all for N_A = 500, and prints a table of the
 main numbers. It works for any results files, e.g. with `--flow` or `--depth-coupling` as well.
 
+`--provider-types` and `--taker-types` give the agents different speeds and order sizes: each K is a type
+that gets a chance every K steps and places orders of K units, and the agents are split equally between
+the types listed. For example, every taker placing 4-unit orders every 4 steps:
+
+```
+python -m experiments.run --n-steps 100000 --n-runs 8 --agent-counts 500 --taker-types 4 --out results/types_takers4.pkl
+```
+
 ### Shock test
 
 Injects one large market sell order into the basic model after the book has settled, and records the

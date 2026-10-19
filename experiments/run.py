@@ -17,6 +17,12 @@ docs/decisions.md, D28), e.g. 0.2 gives 25, 50 and 100 of them for N_A = 125, 25
 --true-value-step sets how much the true value they estimate moves each step (news), and
 --value-spread how far apart their estimates are (docs/decisions.md, D30).
 
+--provider-types and --taker-types give the agents different speeds and order sizes (abm/agents.py,
+AgentType; docs/decisions.md, D27). Each K is a type that gets a chance to act every K steps and
+places orders of K units; the agents are split equally between the types listed, e.g.
+--taker-types 4 makes every taker place 4-unit orders every 4 steps, --provider-types 1 2 4 gives a
+third of the providers each type.
+
 Each flow is a separate experiment with its own results file. Every run stores:
     - RMS price change at ~80 lags from 1 to n_steps/10, for all five price definitions in
       analysis/prices.py (H(delta tau) is derived from these at plot time; see analysis/hurst.py)
@@ -58,6 +64,7 @@ import numpy as np
 
 from abm.buy_probability import BoundedRandomWalk, MeanRevertingWalk
 from abm.simulation import run_simulation
+from abm.agents import AgentType
 from analysis.autocorr import change_autocorrelations
 from analysis.hurst import log_spaced_taus, rms_at_lags
 from analysis.prices import PRICE_DEFINITIONS, price_series
@@ -114,6 +121,27 @@ def describe_entry_depth(flow_name: str, depth_coupling: float) -> Optional[dict
     return {"c_lambda": depth_coupling, "lambda_0": PARAMS["lambda_"], "q_rms": flow.stationary_rms}
 
 
+def split_into_types(kinds, n: int) -> Optional[dict]:
+    """{AgentType(k, k): count} with n agents split as equally as possible between the kinds listed
+    (the first ones get one more when n does not divide evenly). None or an empty list means the
+    paper's agents."""
+    if not kinds:
+        return None
+    base, extra = divmod(n, len(kinds))
+    mix = {}
+    for i, k in enumerate(kinds):
+        mix[AgentType(k, k)] = mix.get(AgentType(k, k), 0) + base + (1 if i < extra else 0)
+    return mix
+
+
+def describe_agent_types(provider_types, taker_types) -> Optional[dict]:
+    """The agent types, as saved in the results file (None when every agent is the paper's, which
+    keeps those files identical in format to ones made before agent types were added)."""
+    if not provider_types and not taker_types:
+        return None
+    return {"providers": list(provider_types or [1]), "takers": list(taker_types or [1])}
+
+
 def describe_value_traders(fraction: float, true_value_step: float, spread: float) -> Optional[dict]:
     """The value trader settings, as saved in the results file (None when there are none, which
     keeps those files identical in format to ones made before value traders were added)."""
@@ -150,11 +178,13 @@ RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
 
 def run_one(job):
     """One independent simulation, reduced to the quantities the figures need.
-    job = (n_agents, seed, n_steps, flow name, depth coupling C_lambda, value traders).
-    value traders = (share of the takers, true value step, mean shift). It can be left off the
-    job, which means none."""
+    job = (n_agents, seed, n_steps, flow name, depth coupling C_lambda, value traders, agent types).
+    value traders = (share of the takers, true value step, mean shift); agent types = (provider
+    kinds, taker kinds), see split_into_types. Both can be left off the job, which means none."""
     n_agents, seed, n_steps, flow_name, depth_coupling, *rest = job
     value_fraction, true_value_step, value_spread = rest[0] if rest else (0.0, 1.0, 50.0)
+    provider_kinds, taker_kinds = rest[1] if len(rest) > 1 else ((), ())
+    n_value_traders = round(value_fraction * n_agents)
     flow = make_flow(flow_name)                 # fresh for this run
     q_rms = flow.stationary_rms if depth_coupling > 0 else None      # Eq. 4's sqrt(<(q - 1/2)^2>)
     record_depth = n_agents == DEPTH_AGENTS
@@ -166,9 +196,11 @@ def run_one(job):
         taker_flow=flow,
         depth_coupling=depth_coupling,
         q_rms=q_rms,
-        n_value_traders=round(value_fraction * n_agents),
+        n_value_traders=n_value_traders,
         true_value_step=true_value_step,
         value_spread=value_spread,
+        provider_mix=split_into_types(provider_kinds, n_agents),
+        taker_mix=split_into_types(taker_kinds, n_agents - n_value_traders),
         **PARAMS,
     )
 
@@ -223,11 +255,11 @@ def run_one(job):
 
 # Settings that must match for saved runs to be combined with new ones.
 CHECKED_SETTINGS = ("format", "n_steps", "params", "return_bin_edges", "depth_window",
-                    "price_definitions", "lag_points", "flow", "entry_depth", "value_traders")
+                    "price_definitions", "lag_points", "flow", "entry_depth", "value_traders", "agent_types")
 
 
 def make_config(n_steps: int, git: dict, flow_name: str = "symmetric", depth_coupling: float = 0.0,
-                value: tuple = (0.0, 1.0, 50.0)) -> dict:
+                value: tuple = (0.0, 1.0, 50.0), types: tuple = ((), ())) -> dict:
     """The settings that define an experiment; saved with the results and checked on --resume.
     value = (share of the takers that are value traders, true value step, mean shift)."""
     return {"format": RESULTS_FORMAT, "n_steps": n_steps, "params": PARAMS,
@@ -235,6 +267,7 @@ def make_config(n_steps: int, git: dict, flow_name: str = "symmetric", depth_cou
             "price_definitions": PRICE_DEFINITIONS, "lag_points": LAG_POINTS,
             "flow": describe_flow(flow_name), "entry_depth": describe_entry_depth(flow_name, depth_coupling),
             "value_traders": describe_value_traders(*value),
+            "agent_types": describe_agent_types(*types),
             "autocorr": {"interval": AUTOCORR_INTERVAL, "max_lag": AUTOCORR_MAX_LAG},
             "git": git}
 
@@ -253,6 +286,10 @@ def main(argv=None):
                         help="mean distance of a value trader's own value from the true value, in ticks (default 50)")
     parser.add_argument("--n-steps", type=int, default=1_000_000)
     parser.add_argument("--n-runs", type=int, default=50, help="runs per N_A")
+    parser.add_argument("--provider-types", type=int, nargs="+", default=None, metavar="K",
+                        help="provider types: K = a chance every K steps, orders of K units (default: 1, the paper's)")
+    parser.add_argument("--taker-types", type=int, nargs="+", default=None, metavar="K",
+                        help="taker types, in the same form (default: 1, the paper's)")
     parser.add_argument("--agent-counts", type=int, nargs="+", default=list(AGENT_COUNTS),
                         help=f"which N_A to run (default: all of {AGENT_COUNTS})")
     parser.add_argument("--workers", type=int, default=os.cpu_count())
@@ -271,6 +308,9 @@ def main(argv=None):
     if not (0 <= args.value_fraction <= 1):
         raise SystemExit("--value-fraction must be between 0 and 1")
     value = (args.value_fraction, args.true_value_step, args.value_spread)
+    if any(k < 1 for k in (args.provider_types or []) + (args.taker_types or [])):
+        raise SystemExit("--provider-types and --taker-types must be 1 or more")
+    types = (tuple(args.provider_types or ()), tuple(args.taker_types or ()))
     if args.out is None:
         suffix = f"_c{args.depth_coupling:g}" if args.depth_coupling > 0 else ""
         suffix += f"_v{args.value_fraction:g}" if args.value_fraction > 0 else ""
@@ -278,7 +318,7 @@ def main(argv=None):
 
     # Captured before the runs start, so it describes the code the workers actually load.
     git = git_info()
-    config = make_config(args.n_steps, git, args.flow, args.depth_coupling, value)
+    config = make_config(args.n_steps, git, args.flow, args.depth_coupling, value, types)
 
     parts_dir = parts_dir_for(args.out)
     if has_parts(parts_dir) and not args.resume:
@@ -328,6 +368,9 @@ def main(argv=None):
     print("entry depth: fixed at lambda_0" if depth is None else
           f"entry depth: Eq. 4, lambda(t) = {depth['lambda_0']:g} (1 + |q - 1/2| / {depth['q_rms']:.4f} "
           f"* {depth['c_lambda']:g})")
+    kinds = config["agent_types"]
+    print("agent types: all the paper's (1 unit every step)" if kinds is None else
+          f"agent types: providers {kinds['providers']}, takers {kinds['takers']} (K = orders of K units every K steps)")
     traders = config["value_traders"]
     print("value traders: none" if traders is None else
           f"value traders: {traders['fraction']:.0%} of the takers (true value step {traders['true_value_step']:g}, "
@@ -345,7 +388,7 @@ def main(argv=None):
     start = time.perf_counter()
     if todo:
         with ProcessPoolExecutor(max_workers=args.workers) as pool:
-            futures = [pool.submit(run_one, (n, seed, args.n_steps, args.flow, args.depth_coupling, value))
+            futures = [pool.submit(run_one, (n, seed, args.n_steps, args.flow, args.depth_coupling, value, types))
                        for n, seed in todo]
             try:
                 for count, future in enumerate(as_completed(futures), n_already + 1):

@@ -361,6 +361,9 @@ def describe_settings(config: dict) -> str:
     text = (config.get("flow") or {}).get("name", "symmetric")
     if config.get("entry_depth") is not None:
         text += " + Eq. 4"
+    kinds = config.get("agent_types")
+    if kinds is not None:
+        text += f", provider types {kinds['providers']}, taker types {kinds['takers']}"
     traders = config.get("value_traders")
     text += ", no value traders" if traders is None else f", {traders['fraction']:.0%} value traders"
     return text
