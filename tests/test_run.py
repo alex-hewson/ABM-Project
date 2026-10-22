@@ -214,6 +214,18 @@ def test_run_one_with_agent_types():
     check("agent types and value traders can be combined", mixed["n_match_failures"] == 0)
 
 
+def test_run_one_with_momentum_traders():
+    plain = run_one((125, 0, 3_000, "symmetric", 0.0))
+    spelled_out = run_one((125, 0, 3_000, "symmetric", 0.0, (0.0, 1.0, 50.0), ((), ()), (0.0, (1,), 50, 1.0)))
+    with_traders = run_one((125, 0, 3_000, "symmetric", 0.0, (0.0, 1.0, 50.0), ((), ()), (0.4, (1, 2), 50, 1.0)))
+    check("no momentum traders written out is the plain run", same_run(plain, spelled_out))
+    check("with 40% momentum traders the run is a different one", not same_run(plain, with_traders))
+    check("their settings are recorded in the config, None when not used",
+          make_config(1000, {})["momentum_traders"] is None
+          and make_config(1000, {}, momentum=(0.2, (1, 2), 50, 1.0))["momentum_traders"]
+          == {"fraction": 0.2, "orders": [1, 2], "window": 50, "scale": 1.0})
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

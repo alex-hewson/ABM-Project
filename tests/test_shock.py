@@ -101,6 +101,16 @@ def test_a_run_with_value_traders_differs_only_by_having_them():
     check("and the book still has both sides throughout", np.all(with_traders["spread"] > 0))
 
 
+def test_a_run_with_momentum_traders():
+    plain = run_one((300, 3, WARMUP, AFTER, False, None, None, NO_VALUE_TRADERS))
+    spelled_out = run_one((300, 3, WARMUP, AFTER, False, None, None, NO_VALUE_TRADERS, (0, (1,), 50, 1.0)))
+    both = run_one((300, 3, WARMUP, AFTER, False, None, None, (50, 1.0, 50.0), (50, (1,), 50, 1.0)))
+    check("no momentum traders written out is the plain run",
+          all(np.array_equal(plain[q], spelled_out[q]) for q in QUANTITIES))
+    check("value and momentum traders together: a different run, with both sides of the book throughout",
+          not np.array_equal(plain["spread"], both["spread"]) and np.all(both["spread"] > 0))
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

@@ -217,6 +217,29 @@ to anything. With no value traders the model is exactly the baseline (D23).
   to 0.5) cannot count as evidence. Shorter times, and the recovery after a shock, are still the
   order book's own. The news step is to be set from the long-run volatility of real data.
 
+**D31. Momentum traders: agents that follow the trend. [Assumed, Checked]**
+Suggested by the finance supervisor as a main factor in flash crashes.
+- A momentum trader reads the trend from the mid-prices of the last W steps (W = 50 by default). A
+  polynomial is fitted through them by least squares. Its order says how many derivatives of the
+  price the trader can see: 1 (slope), 2 (also curvature) or 3 (also the third derivative).
+- It predicts the move over the next W steps by carrying the fitted curve forward, and buys with
+  probability 1/2 + 1/2 tanh(predicted move / scale), with market orders. The tanh shape is a choice:
+  50/50 with no trend, up and down treated alike, and certain for a very strong trend.
+- **Provisional: the scale is the typical size of that order's own predictions** (an exponentially
+  weighted root mean square, memory 1,000 steps), times a setting that is 1 by default. So each
+  trader reacts to how unusual its signal is, not to its raw size. Without this, the order-2 and
+  order-3 traders, whose predictions are 5–25 times larger, were almost always fully committed to
+  noise. This may be changed later, e.g. to a fixed scale in ticks set from data.
+- They take the place of some of the takers and act at the same rate μ. Several orders can be mixed,
+  split equally. Until the window has filled, and for a further W steps while the typical size is
+  first measured, they buy or sell with equal chance.
+- **Window:** 10 steps was tried first. Over 10 steps the mid-price mostly bounces between bid and
+  ask, so the higher derivatives were nearly all noise (`validation.md`, section 15). 50 is the
+  default; the window is a setting to explore.
+
+With no momentum traders the model is exactly as before: runs with value traders, agent types and a
+shock give the same numbers as before momentum traders were added.
+
 ---
 
 ## 5. Still open
@@ -231,6 +254,8 @@ to anything. With no value traders the model is exactly the baseline (D23).
   takers' buy probability. Real markets have them, so the E-mini comparison will need a source of fat
   tails, e.g. providers that place orders further away when recent volatility is high. The true value
   design has not been tried in the Fig. 4 model yet.
+- **Momentum trader scale (D31).** Whether to keep scaling each trader's signal by its own typical
+  size, or use a fixed scale.
 - **Where the order book hands over to news.** Up to some time scale the price's randomness is the
   order book's own; beyond it, it follows the true value. Where that happens, and whether it matches
   real data, has not been measured.

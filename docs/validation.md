@@ -451,3 +451,41 @@ measured relative to the true value, D25) and c8d0943 for the runs without a sho
 - With news 1 and strong value traders (20%, 50 ticks) the price recovers half of a crash in about 90
   steps while its normal-times statistics are nearly those of the model without value traders. This
   depends on 1 tick of news per step matching the order book's own wandering (D30).
+
+## 15. Momentum traders (first look)
+
+Fig. 2 setup, no value traders, N_A = 250, 40,000 steps, 6 runs per setting (D31). "Typical move" is
+the RMS price change over 200 steps; the autocorrelation is of changes over 10-step blocks, at a lag
+of 1 and 3 blocks. No setting emptied a side of the book or left a market order unfilled.
+
+**Window 10, fixed scale of 10 ticks** (the first design):
+
+| Momentum traders | Typical move | Autocorr. lag 1 / lag 3 | Typical predicted move |
+|---|---|---|---|
+| none | 17.9 | −0.30 / −0.02 | – |
+| 50, order 1 | 20.7 | −0.21 / −0.03 | 9 |
+| 150, order 1 | 29.4 | +0.17 / −0.20 | 10 |
+| 50, order 2 | 18.7 | −0.38 / −0.02 | 45 |
+| 150, order 2 | 19.4 | −0.65 / −0.21 | 57 |
+| 50, order 3 | 18.5 | −0.29 / −0.03 | 222 |
+
+Over 10 steps the mid-price mostly bounces between bid and ask, so the 2nd and 3rd derivatives are
+mostly noise, and the order-2 traders made the bounce stronger instead of following a trend.
+
+**Window 50, each order scaled by its own typical prediction** (the current design):
+
+| Momentum traders | Typical move | Autocorr. lag 1 / lag 3 | Kurtosis |
+|---|---|---|---|
+| none | 17.9 | −0.30 / −0.02 | 2.88 |
+| 50, order 1 | 35.0 | −0.19 / +0.11 | 2.30 |
+| 100, order 1 | 66.4 | +0.08 / +0.31 | 1.54 |
+| 100, order 2 | 20.4 | +0.17 / −0.21 | 2.75 |
+| 100, order 3 | 17.7 | +0.01 / −0.35 | 2.91 |
+| 100, orders 1/2/3 mixed | 27.2 | −0.02 / −0.08 | 2.66 |
+
+- Order-1 traders amplify trends: with 100 of them the price moves nearly four times as much, and
+  changes 30 steps apart are clearly alike.
+- Order-2 and order-3 traders read the curvature, so they tend to sell before a rise turns and buy
+  before a fall turns: short trends, then reversals, but little extra movement.
+- No fat tails. With strong order-1 momentum the kurtosis falls well below 3: the price swings in
+  long, regular waves instead of making rare large jumps.

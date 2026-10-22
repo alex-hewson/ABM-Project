@@ -23,6 +23,11 @@ places orders of K units; the agents are split equally between the types listed,
 --taker-types 4 makes every taker place 4-unit orders every 4 steps, --provider-types 1 2 4 gives a
 third of the providers each type.
 
+--momentum-fraction F turns that share of the takers into momentum traders (abm/agents.py,
+MomentumTrader; docs/decisions.md, D31), which follow the trend of the last --momentum-window
+mid-prices. --momentum-orders lists how many derivatives they see (1, 2 or 3; split equally), and
+--momentum-scale how strong a signal, in units of its typical size, makes them fairly sure.
+
 Each flow is a separate experiment with its own results file. Every run stores:
     - RMS price change at ~80 lags from 1 to n_steps/10, for all five price definitions in
       analysis/prices.py (H(delta tau) is derived from these at plot time; see analysis/hurst.py)
@@ -142,6 +147,13 @@ def describe_agent_types(provider_types, taker_types) -> Optional[dict]:
     return {"providers": list(provider_types or [1]), "takers": list(taker_types or [1])}
 
 
+def describe_momentum_traders(fraction: float, orders, window: int, scale: float) -> Optional[dict]:
+    """The momentum trader settings, as saved in the results file (None when there are none)."""
+    if fraction == 0:
+        return None
+    return {"fraction": fraction, "orders": list(orders), "window": window, "scale": scale}
+
+
 def describe_value_traders(fraction: float, true_value_step: float, spread: float) -> Optional[dict]:
     """The value trader settings, as saved in the results file (None when there are none, which
     keeps those files identical in format to ones made before value traders were added)."""
@@ -184,7 +196,9 @@ def run_one(job):
     n_agents, seed, n_steps, flow_name, depth_coupling, *rest = job
     value_fraction, true_value_step, value_spread = rest[0] if rest else (0.0, 1.0, 50.0)
     provider_kinds, taker_kinds = rest[1] if len(rest) > 1 else ((), ())
+    momentum_fraction, momentum_orders, momentum_window, momentum_scale = rest[2] if len(rest) > 2 else (0.0, (1,), 50, 1.0)
     n_value_traders = round(value_fraction * n_agents)
+    n_momentum_traders = round(momentum_fraction * n_agents)
     flow = make_flow(flow_name)                 # fresh for this run
     q_rms = flow.stationary_rms if depth_coupling > 0 else None      # Eq. 4's sqrt(<(q - 1/2)^2>)
     record_depth = n_agents == DEPTH_AGENTS
@@ -200,7 +214,11 @@ def run_one(job):
         true_value_step=true_value_step,
         value_spread=value_spread,
         provider_mix=split_into_types(provider_kinds, n_agents),
-        taker_mix=split_into_types(taker_kinds, n_agents - n_value_traders),
+        taker_mix=split_into_types(taker_kinds, n_agents - n_value_traders - n_momentum_traders),
+        n_momentum_traders=n_momentum_traders,
+        momentum_orders=momentum_orders,
+        momentum_window=momentum_window,
+        momentum_scale=momentum_scale,
         **PARAMS,
     )
 
@@ -255,11 +273,13 @@ def run_one(job):
 
 # Settings that must match for saved runs to be combined with new ones.
 CHECKED_SETTINGS = ("format", "n_steps", "params", "return_bin_edges", "depth_window",
-                    "price_definitions", "lag_points", "flow", "entry_depth", "value_traders", "agent_types")
+                    "price_definitions", "lag_points", "flow", "entry_depth", "value_traders", "agent_types",
+                    "momentum_traders")
 
 
 def make_config(n_steps: int, git: dict, flow_name: str = "symmetric", depth_coupling: float = 0.0,
-                value: tuple = (0.0, 1.0, 50.0), types: tuple = ((), ())) -> dict:
+                value: tuple = (0.0, 1.0, 50.0), types: tuple = ((), ()),
+                momentum: tuple = (0.0, (1,), 50, 1.0)) -> dict:
     """The settings that define an experiment; saved with the results and checked on --resume.
     value = (share of the takers that are value traders, true value step, mean shift)."""
     return {"format": RESULTS_FORMAT, "n_steps": n_steps, "params": PARAMS,
@@ -268,6 +288,7 @@ def make_config(n_steps: int, git: dict, flow_name: str = "symmetric", depth_cou
             "flow": describe_flow(flow_name), "entry_depth": describe_entry_depth(flow_name, depth_coupling),
             "value_traders": describe_value_traders(*value),
             "agent_types": describe_agent_types(*types),
+            "momentum_traders": describe_momentum_traders(*momentum),
             "autocorr": {"interval": AUTOCORR_INTERVAL, "max_lag": AUTOCORR_MAX_LAG},
             "git": git}
 
@@ -286,6 +307,14 @@ def main(argv=None):
                         help="mean distance of a value trader's own value from the true value, in ticks (default 50)")
     parser.add_argument("--n-steps", type=int, default=1_000_000)
     parser.add_argument("--n-runs", type=int, default=50, help="runs per N_A")
+    parser.add_argument("--momentum-fraction", type=float, default=0.0,
+                        help="share of the takers that are momentum traders, 0 to 1 (default 0: none)")
+    parser.add_argument("--momentum-orders", type=int, nargs="+", default=[1], choices=(1, 2, 3),
+                        help="how many derivatives they see; several are split equally (default 1)")
+    parser.add_argument("--momentum-window", type=int, default=50,
+                        help="steps of past mid-prices they read the trend from (default 50)")
+    parser.add_argument("--momentum-scale", type=float, default=1.0,
+                        help="signal, in units of its typical size, that makes them fairly sure (default 1)")
     parser.add_argument("--provider-types", type=int, nargs="+", default=None, metavar="K",
                         help="provider types: K = a chance every K steps, orders of K units (default: 1, the paper's)")
     parser.add_argument("--taker-types", type=int, nargs="+", default=None, metavar="K",
@@ -311,6 +340,9 @@ def main(argv=None):
     if any(k < 1 for k in (args.provider_types or []) + (args.taker_types or [])):
         raise SystemExit("--provider-types and --taker-types must be 1 or more")
     types = (tuple(args.provider_types or ()), tuple(args.taker_types or ()))
+    if not (0 <= args.momentum_fraction <= 1) or args.momentum_fraction + args.value_fraction > 1:
+        raise SystemExit("--momentum-fraction must be between 0 and 1, and together with --value-fraction at most 1")
+    momentum = (args.momentum_fraction, tuple(args.momentum_orders), args.momentum_window, args.momentum_scale)
     if args.out is None:
         suffix = f"_c{args.depth_coupling:g}" if args.depth_coupling > 0 else ""
         suffix += f"_v{args.value_fraction:g}" if args.value_fraction > 0 else ""
@@ -318,7 +350,7 @@ def main(argv=None):
 
     # Captured before the runs start, so it describes the code the workers actually load.
     git = git_info()
-    config = make_config(args.n_steps, git, args.flow, args.depth_coupling, value, types)
+    config = make_config(args.n_steps, git, args.flow, args.depth_coupling, value, types, momentum)
 
     parts_dir = parts_dir_for(args.out)
     if has_parts(parts_dir) and not args.resume:
@@ -368,6 +400,10 @@ def main(argv=None):
     print("entry depth: fixed at lambda_0" if depth is None else
           f"entry depth: Eq. 4, lambda(t) = {depth['lambda_0']:g} (1 + |q - 1/2| / {depth['q_rms']:.4f} "
           f"* {depth['c_lambda']:g})")
+    trend = config["momentum_traders"]
+    print("momentum traders: none" if trend is None else
+          f"momentum traders: {trend['fraction']:.0%} of the takers (orders {trend['orders']}, window "
+          f"{trend['window']}, scale {trend['scale']:g})")
     kinds = config["agent_types"]
     print("agent types: all the paper's (1 unit every step)" if kinds is None else
           f"agent types: providers {kinds['providers']}, takers {kinds['takers']} (K = orders of K units every K steps)")
@@ -388,7 +424,8 @@ def main(argv=None):
     start = time.perf_counter()
     if todo:
         with ProcessPoolExecutor(max_workers=args.workers) as pool:
-            futures = [pool.submit(run_one, (n, seed, args.n_steps, args.flow, args.depth_coupling, value, types))
+            futures = [pool.submit(run_one, (n, seed, args.n_steps, args.flow, args.depth_coupling, value, types,
+                                                   momentum))
                        for n, seed in todo]
             try:
                 for count, future in enumerate(as_completed(futures), n_already + 1):

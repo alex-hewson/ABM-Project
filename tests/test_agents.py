@@ -11,7 +11,9 @@ import random
 
 from abm.orderbook import OrderBook, Side, OrderResult
 from abm.agents import (LiquidityProvider, LiquidityTaker, AgentType, is_turn, ValueTrader,
-                        draw_value_shift, market_price)
+                        draw_value_shift, market_price, TrendReader, TypicalSize, MomentumTrader,
+                        momentum_buy_probability)
+import numpy as np
 
 
 def check(label, condition):
@@ -380,6 +382,65 @@ def test_value_trader_acts_at_its_rate_and_only_on_its_turn():
     sometimes = ValueTrader(agent_id=9, mu=0.3, shift=0.4)
     hits = sum(sometimes.maybe_submit(book_with_spread(), t, 100.0, rng) is not None for t in range(n))
     check(f"mu = 0.3: submission rate {hits / n:.3f} within 0.02 of 0.3", abs(hits / n - 0.3) < 0.02)
+
+
+def test_trend_reader_recovers_each_kind_of_curve_exactly():
+    reader = TrendReader(window=10)               # predicts 10 steps ahead
+    t = np.arange(-9, 1, dtype=float)             # the 10 steps, latest = 0
+    line = 5 + 3 * t
+    check("a straight line: every order predicts 3 x 10 = 30",
+          all(abs(reader.predicted_move(line, o) - 30) < 1e-9 for o in (1, 2, 3)))
+    curve = 5 + 3 * t + 0.5 * t ** 2              # true move 10 steps ahead: 3*10 + 0.5*100 = 80
+    check("a parabola: orders 2 and 3 predict 80 exactly",
+          abs(reader.predicted_move(curve, 2) - 80) < 1e-9 and abs(reader.predicted_move(curve, 3) - 80) < 1e-9)
+    check("order 1 only sees the average slope, and here even gets the direction wrong",
+          reader.predicted_move(curve, 1) < 0)
+    cubic = curve + 0.1 * t ** 3                  # true move: 80 + 0.1*1000 = 180
+    check("a cubic: only order 3 predicts 180", abs(reader.predicted_move(cubic, 3) - 180) < 1e-9
+          and abs(reader.predicted_move(cubic, 2) - 180) > 1)
+    flat = np.full(10, 1_000_000.0)
+    check("a flat price: no move predicted", all(abs(reader.predicted_move(flat, o)) < 1e-6 for o in (1, 2, 3)))
+    check("a window under 4 steps is refused", raises_value_error(TrendReader, 3))
+
+
+def test_typical_size_is_the_root_mean_square():
+    size = TypicalSize(memory=1000)
+    for v in (3.0, -4.0):
+        size.add(v)
+    check("of 3 and -4: sqrt((9 + 16) / 2)", abs(size.value - (12.5 ** 0.5)) < 1e-12)
+    slow = TypicalSize(memory=10)
+    for _ in range(10):
+        slow.add(1.0)
+    for _ in range(200):
+        slow.add(5.0)
+    check("it forgets old values: after many 5s it is close to 5", abs(slow.value - 5) < 0.01)
+
+
+def test_momentum_buy_probability_shape():
+    check("no trend: a coin flip", momentum_buy_probability(0.0, 10.0) == 0.5)
+    check("one scale up: 0.88", abs(momentum_buy_probability(10.0, 10.0) - 0.5 - 0.5 * np.tanh(1.0)) < 1e-12)
+    check("up and down are mirror images",
+          abs(momentum_buy_probability(7.0, 10.0) + momentum_buy_probability(-7.0, 10.0) - 1) < 1e-12)
+    check("a very strong trend: nearly certain", momentum_buy_probability(100.0, 10.0) > 0.999)
+
+
+def test_momentum_trader_follows_the_chance_it_is_given():
+    book = OrderBook()
+    for i in range(400):
+        book.submit_limit_order(Side.BID, 100 - i % 5, 0)
+        book.submit_limit_order(Side.ASK, 101 + i % 5, 0)
+    rng = random.Random(4)
+    trader = MomentumTrader(agent_id=9, mu=1.0, order=1)
+    for t in range(200):
+        trader.submit(book, t, 0.9, rng)
+    buys = sum(tr.aggressor_side is Side.BID for tr in book.trades)
+    check(f"a 0.9 chance of buying: {buys} buys out of 200 (within 3 standard errors of 180)", abs(buys - 180) < 13)
+    check("market orders: every one traded at once", len(book.trades) == 200)
+    slow = MomentumTrader(agent_id=10, mu=1.0, order=1, interval=4, offset=1)
+    acted = [t for t in range(12) if slow.maybe_submit(book, t, 0.5, rng) is not None]
+    check("interval 4, offset 1: acts on steps 3, 7, 11 only", acted == [3, 7, 11])
+    lazy = MomentumTrader(agent_id=11, mu=0.0, order=1)
+    check("mu = 0: never acts", all(lazy.maybe_submit(book, t, 0.5, rng) is None for t in range(100)))
 
 
 if __name__ == "__main__":

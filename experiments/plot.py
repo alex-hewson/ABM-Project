@@ -361,6 +361,9 @@ def describe_settings(config: dict) -> str:
     text = (config.get("flow") or {}).get("name", "symmetric")
     if config.get("entry_depth") is not None:
         text += " + Eq. 4"
+    trend = config.get("momentum_traders")
+    if trend is not None:
+        text += f", {trend['fraction']:.0%} momentum (orders {trend['orders']}, window {trend['window']})"
     kinds = config.get("agent_types")
     if kinds is not None:
         text += f", provider types {kinds['providers']}, taker types {kinds['takers']}"

@@ -115,8 +115,10 @@ The plan for the rest of Phase 2 is in `phase2_plan.md`.
 1. Find value trader settings (number, size of errors, amount of news) that give recovery after a shock
    without pinning the price in normal times. The sweep is ready to run on the cluster
    (`experiments/value_sweep.py`, `cluster/value_sweep.slurm`).
-2. Give value traders the speed and size types (D27), to see whether fast and slow value traders
-   recover differently.
+2. Momentum traders are built (D31). Next: momentum and value traders together after a shock, then
+   news (jumps in the true value) and a "Poisson trader" (large orders at random times, larger the
+   longer since the last), then the scaling of correlation functions and a phase diagram of momentum
+   against value traders (supervisors' requests, 20 October 2026).
 3. Fat tails: providers that place their orders further from the midpoint when recent volatility is
    high. This keeps the idea of Eq. 4 (entry depth widens in turbulent times), but providers react
    to something they can see, the recent price changes, instead of the takers' hidden buy

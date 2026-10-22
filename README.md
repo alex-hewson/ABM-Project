@@ -47,7 +47,7 @@ lines). The tail widths match the paper's Fig. 4b to within reading error: for e
 
 | Folder | Contents |
 |---|---|
-| `abm/` | The model: `orderbook.py` (matching engine), `agents.py` (liquidity providers / takers, agent types with different speeds and order sizes, and value traders, which react to the price), `buy_probability.py` (how the takers' buy probability changes over time, Figs. 3 and 4), `simulation.py` (step loop, runs agents through orderbook) |
+| `abm/` | The model: `orderbook.py` (matching engine), `agents.py` (liquidity providers / takers, agent types with different speeds and order sizes, value traders, which react to the price, and momentum traders, which follow the trend), `buy_probability.py` (how the takers' buy probability changes over time, Figs. 3 and 4), `simulation.py` (step loop, runs agents through orderbook) |
 | `analysis/` | Measurements on one simulation's output: `prices.py` (price series), `hurst.py` (Hurst exponent), `returns.py` (return distributions), `depth_profile.py` (depth profile + lognormal fit), `recovery.py` (how far a shock moves the book and how much is undone), `autocorr.py` (autocorrelation of price changes and of their size, i.e. volatility clustering) |
 | `experiments/` | Reproducing the paper's figures: `run.py` (runs many simulations and saves the results), `plot.py` (draws Fig. 2, 3 or 4 from saved results, or compares several results files); `checkpoint.py` and `provenance.py` are support code these two use, not called directly. `shock.py` is the shock test: one large market order, then the book is watched as it refills |
 | `tests/` | One test file per file above |
@@ -188,6 +188,11 @@ every type trades the same volume on average. The counts must add up to 250:
 python -m experiments.shock --provider-mix 4:250 --out results/shock_providers4.png
 python -m experiments.shock --provider-mix 1:100 2:100 4:50 --out results/shock_mixed.png
 ```
+
+`--momentum-traders N` turns N of the takers into momentum traders, which follow the trend of the last
+`--momentum-window` mid-prices (50 by default); `--momentum-orders 1 2 3` says how many derivatives of
+the price they see. The runner has the same options as `--momentum-fraction` etc. (see
+`docs/decisions.md`, D31).
 
 `--value-traders N` turns N of the 250 takers into value traders. Each has its own estimate of the
 asset's true value, which moves only with news (plus or minus a personal error), buys when the price is

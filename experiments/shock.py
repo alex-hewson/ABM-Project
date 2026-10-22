@@ -30,6 +30,12 @@ in ticks):
 
     python -m experiments.shock --value-traders 125 --out results/shock_value125.png
 
+--momentum-traders N turns N of the takers into momentum traders (abm/agents.py, MomentumTrader),
+which follow the trend of the last --momentum-window mid-prices; --momentum-orders and
+--momentum-scale as in experiments/run.py. Value and momentum traders can be combined:
+
+    python -m experiments.shock --value-traders 50 --momentum-traders 50 --out results/shock_both.png
+
 Recorded each step and averaged over runs:
     price    mid-price minus its value at the step before the shock
     spread   best ask minus best bid
@@ -106,12 +112,15 @@ def describe_mix(mix, n_agents=N_AGENTS):
 
 def run_one(task):
     """One run: returns the window around the shock for each recorded quantity."""
-    size, seed, warmup, after, buy, provider_mix, taker_mix, value = task
+    size, seed, warmup, after, buy, provider_mix, taker_mix, value, *more = task
     n_value_traders, true_value_step, value_spread = value
+    n_momentum_traders, momentum_orders, momentum_window, momentum_scale = more[0] if more else (0, (1,), 50, 1.0)
     shock = Shock(step=warmup, size=size, side=Side.BID if buy else Side.ASK) if size > 0 else None
     r = run_simulation(n_agents=N_AGENTS, n_steps=warmup + after + 1, seed=seed, shock=shock,
                        record_sides=True, keep_trades=False, provider_mix=provider_mix, taker_mix=taker_mix,
                        n_value_traders=n_value_traders, true_value_step=true_value_step, value_spread=value_spread,
+                       n_momentum_traders=n_momentum_traders, momentum_orders=momentum_orders,
+                       momentum_window=momentum_window, momentum_scale=momentum_scale,
                        **PARAMS)
     mid = window(r.mid_price_series, warmup, BEFORE, after)
     price = mid - mid[BEFORE - 1]                # change since the step before the shock
@@ -187,7 +196,8 @@ def plot(means, sizes, config, out):
     fig.suptitle(f"Shock test: one market {what} order at step 0, basic model, N$_A$={N_AGENTS}, "
                  f"mean of {config['n_runs']} runs\n"
                  f"providers: {config['providers']}   |   takers: {config['takers']}"
-                 + (f"   |   {config['value_traders']}" if config["n_value_traders"] else ""), fontsize=11)
+                 + (f"   |   {config['value_traders']}" if config["n_value_traders"] else "")
+                 + (f"   |   {config['momentum_traders']}" if config.get("n_momentum_traders") else ""), fontsize=11)
     fig.text(0.995, 0.005, "code version: " + describe(config["git"]), ha="right", va="bottom",
              fontsize=7, color="gray")
     fig.tight_layout()
@@ -215,6 +225,14 @@ def main(argv=None):
                         help="how much the true value moves each step: the standard deviation, in ticks (default 1)")
     parser.add_argument("--value-spread", type=float, default=50.0,
                         help="mean distance of a value trader's own value from the true value, in ticks (default 50)")
+    parser.add_argument("--momentum-traders", type=int, default=0,
+                        help="how many of the takers are momentum traders (default 0)")
+    parser.add_argument("--momentum-orders", type=int, nargs="+", default=[1], choices=(1, 2, 3),
+                        help="how many derivatives they see; several are split equally (default 1)")
+    parser.add_argument("--momentum-window", type=int, default=50,
+                        help="steps of past mid-prices they read the trend from (default 50)")
+    parser.add_argument("--momentum-scale", type=float, default=1.0,
+                        help="signal, in units of its typical size, that makes them fairly sure (default 1)")
     parser.add_argument("--workers", type=int, default=None, help="processes to use (default: all cores)")
     parser.add_argument("--out", type=Path, default=Path("results/shock_test.png"))
     args = parser.parse_args(argv)
@@ -225,16 +243,17 @@ def main(argv=None):
         provider_mix, taker_mix = parse_mix(args.provider_mix), parse_mix(args.taker_mix)
     except ValueError as error:
         parser.error(str(error))
-    if not (0 <= args.value_traders <= N_AGENTS):
-        parser.error(f"--value-traders must be between 0 and {N_AGENTS}")
-    n_takers = N_AGENTS - args.value_traders        # value traders take the place of takers
+    if not (0 <= args.value_traders <= N_AGENTS) or not (0 <= args.momentum_traders <= N_AGENTS - args.value_traders):
+        parser.error(f"--value-traders and --momentum-traders must be 0 or more and add up to at most {N_AGENTS}")
+    n_takers = N_AGENTS - args.value_traders - args.momentum_traders   # both take the place of takers
     for name, mix, total in (("--provider-mix", provider_mix, N_AGENTS), ("--taker-mix", taker_mix, n_takers)):
         if mix is not None and sum(mix.values()) != total:
             parser.error(f"{name}: the counts must add up to {total}, got {sum(mix.values())}")
     value = (args.value_traders, args.true_value_step, args.value_spread)
+    momentum = (args.momentum_traders, tuple(args.momentum_orders), args.momentum_window, args.momentum_scale)
 
     sizes = sorted(set(args.sizes))
-    tasks = [(size, seed, args.warmup, args.after, args.buy, provider_mix, taker_mix, value)
+    tasks = [(size, seed, args.warmup, args.after, args.buy, provider_mix, taker_mix, value, momentum)
              for size in sizes for seed in range(args.n_runs)]
     config = dict(sizes=sizes, n_runs=args.n_runs, warmup=args.warmup, after=args.after, buy=args.buy,
                   n_agents=N_AGENTS, params=PARAMS, git=git_info(),
@@ -243,10 +262,15 @@ def main(argv=None):
                   n_value_traders=args.value_traders, true_value_step=args.true_value_step,
                   value_spread=args.value_spread,
                   value_traders=f"{args.value_traders} value traders (true value step {args.true_value_step:g}, "
-                                f"spread {args.value_spread:g})")
+                                f"spread {args.value_spread:g})",
+                  n_momentum_traders=args.momentum_traders, momentum_orders=list(args.momentum_orders),
+                  momentum_window=args.momentum_window, momentum_scale=args.momentum_scale,
+                  momentum_traders=f"{args.momentum_traders} momentum traders (orders {list(args.momentum_orders)}, "
+                                   f"window {args.momentum_window})")
     print(f"{len(tasks)} runs: sizes {sizes}, {args.n_runs} runs each, code version {describe(config['git'])}\n"
           f"providers: {config['providers']}\ntakers:    {config['takers']}"
-          + (f"\nplus:      {config['value_traders']}" if args.value_traders else ""), flush=True)
+          + (f"\nplus:      {config['value_traders']}" if args.value_traders else "")
+          + (f"\nplus:      {config['momentum_traders']}" if args.momentum_traders else ""), flush=True)
 
     start = time.perf_counter()
     windows = {size: {q: [] for q in QUANTITIES} for size in sizes}

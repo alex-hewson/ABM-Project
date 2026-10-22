@@ -8,7 +8,9 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass
-from typing import Optional
+from typing import Dict, Optional, Sequence
+
+import numpy as np
 
 from abm.orderbook import OrderBook, Side, OrderResult
 
@@ -239,3 +241,106 @@ class ValueTrader:
             return book.submit_limit_order(Side.ASK, math.ceil(value), timestamp,
                                            agent_id=self.agent_id, quantity=self.size)
         return None
+
+
+'''
+The momentum trader follows trends: it buys when the price has been rising and sells when it has been
+falling, so it makes any trend that forms stronger.
+
+It only looks at the last few mid-prices (the window, 10 steps by default). A curve is fitted through
+them, and the trader uses the curve's derivatives at the latest step to guess where the price is
+heading. Traders differ in how many derivatives they can see, their order:
+    order 1   the slope only (is the price going up or down?)
+    order 2   also the curvature (is the move speeding up or slowing down?)
+    order 3   also the third derivative (is that speeding up changing?)
+The guess is the fitted curve carried forward `horizon` steps (by default as many as the window):
+    predicted move = v*h + a*h^2/2 + j*h^3/6
+with v, a and j the first, second and third derivatives the trader can see.
+
+It then buys with probability 1/2 + 1/2 * tanh(predicted move / scale): about 50/50 when there is no
+trend, almost always a buy when the price is clearly heading up, almost always a sell when it is
+heading down. The scale is the typical size of that trader's own predictions (TypicalSize below), so
+each trader reacts to how unusual its signal is, not to its raw size: the higher derivatives are much
+noisier, and without this the order-2 and order-3 traders would almost always be all-in on noise
+(docs/decisions.md, D31). It uses market orders, because a trend follower wants to trade now, not wait.
+'''
+class TrendReader:
+    """Reads the recent trend for momentum traders of order 1, 2 and 3.
+
+    Fitting a polynomial of degree d through the last `window` prices by least squares and carrying
+    it `horizon` steps forward is the same as taking a fixed weighted sum of those prices. The weights
+    are worked out once here, so each step only needs one dot product per order."""
+
+    def __init__(self, window: int = 10, horizon: Optional[int] = None):
+        if window < 4:
+            raise ValueError("window must be at least 4 steps (a curve with three derivatives needs four points)")
+        self.window = window
+        self.horizon = window if horizon is None else horizon
+        if self.horizon < 1:
+            raise ValueError("horizon must be at least 1 step")
+        times = np.arange(-(window - 1), 1, dtype=float)       # oldest ... latest (= 0)
+        self.weights: Dict[int, np.ndarray] = {}
+        for order in (1, 2, 3):
+            powers = np.vander(times, order + 1, increasing=True)          # 1, t, t^2, ...
+            fit = np.linalg.pinv(powers)                                     # prices -> coefficients
+            ahead = self.horizon ** np.arange(1, order + 1, dtype=float)     # h, h^2, ... (the constant cancels)
+            self.weights[order] = ahead @ fit[1:]
+
+    def predicted_move(self, prices: Sequence[float], order: int) -> float:
+        """Predicted change of the price `horizon` steps ahead, from the last `window` prices (oldest
+        first), for a trader that sees `order` derivatives."""
+        return float(np.dot(self.weights[order], prices))
+
+
+class TypicalSize:
+    """The typical size of a signal so far: the square root of the average of its squares, with
+    the first `memory` values counting equally and each newer value then counting 1/memory (an
+    exponentially weighted average). It forgets slowly, so a sudden strong signal still stands out."""
+
+    def __init__(self, memory: int = 1000):
+        self.memory = memory
+        self.count = 0
+        self.mean_square = 0.0
+
+    def add(self, value: float) -> None:
+        self.count += 1
+        weight = max(1.0 / self.count, 1.0 / self.memory)
+        self.mean_square += weight * (value * value - self.mean_square)
+
+    @property
+    def value(self) -> float:
+        return self.mean_square ** 0.5
+
+
+def momentum_buy_probability(predicted_move: float, scale: float) -> float:
+    """1/2 + 1/2 * tanh(predicted_move / scale): the chance that a momentum trader buys."""
+    return 0.5 + 0.5 * math.tanh(predicted_move / scale)
+
+
+@dataclass
+class MomentumTrader:
+    agent_id: int
+    mu: float          # probability of submitting an order on its step (the same rate as a taker)
+    order: int         # how many derivatives of the price it can see: 1, 2 or 3
+    interval: int = 1  # gets a chance to act every interval-th step (see AgentType)
+    size: int = 1      # units per order
+    offset: int = 0    # which of those steps: acts when (timestamp + offset) is a multiple of interval
+
+    def maybe_submit(
+            self, book: OrderBook, timestamp: int, buy_probability: float, rng: Optional[random.Random] = None,
+            ) -> Optional[OrderResult]:
+        if not is_turn(timestamp, self.interval, self.offset):
+            return None        # not this agent's step: nothing happens, and no random number is used
+        r = rng or random
+        if r.random() >= self.mu:
+            return None
+        return self.submit(book, timestamp, buy_probability, r)
+
+    def submit(self, book: OrderBook, timestamp: int, buy_probability: float,
+               rng: Optional[random.Random] = None) -> OrderResult:
+        """A market order: a buy with probability buy_probability (worked out by the simulation from the
+        trend this trader can see), otherwise a sell."""
+        r = rng or random
+        side = Side.BID if r.random() < buy_probability else Side.ASK
+        result, _ = book.submit_market_order(side, timestamp, agent_id=self.agent_id, quantity=self.size)
+        return result

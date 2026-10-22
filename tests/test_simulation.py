@@ -569,6 +569,62 @@ def test_fast_and_per_agent_methods_agree_with_value_traders():
     check(f"mean spread: fast {s_fast:.1f} vs per-agent {s_agents:.1f}, within 10%", abs(s_fast - s_agents) < 0.10 * s_agents)
 
 
+def test_momentum_trader_settings_are_validated():
+    kwargs = dict(n_steps=10, **VALUE_KWARGS)
+    check("more value and momentum traders than agents rejected", raises_value_error(
+        lambda: run_simulation(n_value_traders=150, n_momentum_traders=101, **kwargs)))
+    check("an order of 4 rejected", raises_value_error(
+        lambda: run_simulation(n_momentum_traders=10, momentum_orders=(4,), **kwargs)))
+    check("a scale of 0 rejected", raises_value_error(
+        lambda: run_simulation(n_momentum_traders=10, momentum_scale=0.0, **kwargs)))
+    check("a taker mix must add up to the takers left", raises_value_error(
+        lambda: run_simulation(n_momentum_traders=50, taker_mix={AgentType(1, 1): 250}, **kwargs)))
+    ok = run_simulation(n_value_traders=50, n_momentum_traders=50, taker_mix={AgentType(4, 4): 150}, **kwargs)
+    check("value traders, momentum traders and a taker mix together run", len(ok.mid_price_series) == 10)
+
+
+def test_momentum_traders_record_their_trend_from_the_start_of_the_window():
+    r = run_simulation(n_steps=300, seed=2, n_momentum_traders=60, momentum_orders=(1, 2, 3), momentum_window=20,
+                       **VALUE_KWARGS)
+    check("one trend series per order", sorted(r.trend_series) == [1, 2, 3])
+    check("no trend before the window has filled", all(np.all(r.trend_series[o][:20] == 0) for o in (1, 2, 3)))
+    check("then a trend every step", all(np.count_nonzero(r.trend_series[o][20:]) > 250 for o in (1, 2, 3)))
+    check("nothing recorded without momentum traders", run_simulation(n_steps=50, seed=2, **VALUE_KWARGS).trend_series == {})
+
+
+def test_momentum_traders_make_trends_persist():
+    """Order-1 momentum traders with a 50-step window make price changes over consecutive 10-step blocks
+    more alike (first look: lag-3 autocorrelation -0.02 without them, +0.31 with 100)."""
+    from analysis.autocorr import change_autocorrelations
+
+    def lag3(n_momentum):
+        values = []
+        for seed in range(3):
+            r = run_simulation(n_steps=20_000, seed=seed, n_momentum_traders=n_momentum, momentum_orders=(1,),
+                               keep_trades=False, **VALUE_KWARGS)
+            values.append(change_autocorrelations(np.array(r.mid_price_series, dtype=float), 10, 3)["signed"][2])
+        return float(np.mean(values))
+    without, with_traders = lag3(0), lag3(100)
+    check(f"without momentum traders: {without:+.3f}, close to 0", abs(without) < 0.08)
+    check(f"with 100 of them: {with_traders:+.3f}, clearly positive (trends carry on)", with_traders > 0.15)
+
+
+def test_fast_and_per_agent_methods_agree_with_momentum_traders():
+    stats = {}
+    for method in ("fast", "agents"):
+        volumes, traded = [], []
+        for seed in range(4):
+            r = run_simulation(n_steps=1500, seed=seed, method=method, n_momentum_traders=80, momentum_orders=(1, 2),
+                               record_sides=True, **VALUE_KWARGS)
+            volumes.append(settled_volume(r))
+            traded.append(r.book.volume_traded / 1500)
+        stats[method] = (float(np.mean(volumes)), float(np.mean(traded)))
+    (v_fast, t_fast), (v_agents, t_agents) = stats["fast"], stats["agents"]
+    check(f"settled volume: fast {v_fast:.0f} vs per-agent {v_agents:.0f}, within 3%", abs(v_fast - v_agents) < 0.03 * v_agents)
+    check(f"units traded per step: fast {t_fast:.2f} vs per-agent {t_agents:.2f}, within 4%",
+          abs(t_fast - t_agents) < 0.04 * t_agents)
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

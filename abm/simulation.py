@@ -29,13 +29,15 @@ from __future__ import annotations
 
 import itertools
 import random
+from collections import deque
 from dataclasses import dataclass, field
-from typing import Dict, List, Mapping, Optional
+from typing import Dict, List, Mapping, Optional, Sequence
 
 import numpy as np
 
 from abm.orderbook import OrderBook, Side, OrderResult
-from abm.agents import LiquidityProvider, LiquidityTaker, ValueTrader, AgentType, draw_value_shift
+from abm.agents import (LiquidityProvider, LiquidityTaker, ValueTrader, AgentType, draw_value_shift,
+                        MomentumTrader, TrendReader, TypicalSize, momentum_buy_probability)
 from abm.buy_probability import SideProbability
 
 
@@ -104,6 +106,9 @@ class SimulationResult:
     # Value traders (filled only if run_simulation had n_value_traders above 0): the asset's true value
     # in each step, and each trader's own fixed error (shift) in estimating it.
     true_value_series: np.ndarray = field(default_factory=lambda: np.empty(0))
+    # Momentum traders (filled only if run_simulation had n_momentum_traders above 0): for each order of
+    # trader present, the price move it predicted in each step (0 until the window has filled).
+    trend_series: Dict[int, np.ndarray] = field(default_factory=dict)
     value_shifts: np.ndarray = field(default_factory=lambda: np.empty(0))
 
 
@@ -194,6 +199,10 @@ def run_simulation(
     n_value_traders: int = 0,
     true_value_step: float = 1.0,
     value_spread: float = 50.0,
+    n_momentum_traders: int = 0,
+    momentum_orders: Sequence[int] = (2,),
+    momentum_window: int = 50,
+    momentum_scale: float = 1.0,
 ) -> SimulationResult:
     """
     Run the base Preis et al. model for n_steps, after a pre-opening
@@ -259,6 +268,19 @@ def run_simulation(
     with equal chance and exponentially distributed with mean value_spread ticks. If taker_mix is given
     with value traders, it must add up to the takers that are left, n_agents - n_value_traders. The
     true value in each step is returned in result.true_value_series.
+
+    n_momentum_traders turns that many of the remaining takers into momentum traders (see
+    MomentumTrader in agents.py); 0 (the default) leaves the run exactly as it was. They act at the same
+    rate mu. They read the trend from the mid-prices at the end of the last momentum_window steps, and
+    momentum_orders says how many derivatives they see (1, 2 or 3); with several orders listed they are
+    split equally between them. A trader buys with probability 1/2 + 1/2 tanh(predicted move /
+    (momentum_scale x typical size)), where the predicted move (in ticks) is the fitted trend carried
+    momentum_window steps forward, and the typical size is that of its order's predictions so far
+    (see TypicalSize in agents.py). momentum_scale = 1 means a signal of one typical size makes a
+    trader fairly sure (a 0.88 chance of following it); a larger value makes them more cautious. Until
+    the window has filled, and for the first momentum_window steps after, they have no trend to follow
+    (or no idea yet of its normal size) and buy or sell with equal chance. If taker_mix is given, it must add up to the takers left after value and momentum traders.
+    The predicted moves are returned in result.trend_series.
     """
     if method not in ("fast", "agents"):
         raise ValueError(f"method must be 'fast' or 'agents', got {method!r}")
@@ -276,10 +298,16 @@ def run_simulation(
         raise ValueError(f"n_value_traders must be between 0 and n_agents = {n_agents}")
     if true_value_step < 0:
         raise ValueError("true_value_step must be 0 or more")
+    if n_momentum_traders < 0 or n_value_traders + n_momentum_traders > n_agents:
+        raise ValueError(f"value and momentum traders together must be between 0 and n_agents = {n_agents}")
+    if n_momentum_traders and (not momentum_orders or any(o not in (1, 2, 3) for o in momentum_orders)):
+        raise ValueError("momentum_orders must list orders of 1, 2 or 3")
+    if momentum_scale <= 0:
+        raise ValueError("momentum_scale must be above 0")
     if value_spread < 0:
         raise ValueError("value_spread must be 0 or more")
     provider_mix = _check_mix(provider_mix, n_agents, "provider_mix")
-    taker_mix = _check_mix(taker_mix, n_agents - n_value_traders, "taker_mix")
+    taker_mix = _check_mix(taker_mix, n_agents - n_value_traders - n_momentum_traders, "taker_mix")
     fast = method == "fast"    #Checks which method has been selected
     check_stability_condition(alpha, mu, delta)
 
@@ -306,7 +334,17 @@ def run_simulation(
         ValueTrader(agent_id=next(taker_ids), mu=mu, shift=draw_value_shift(rng, value_spread))
         for _ in range(n_value_traders)
     ]
+    # Momentum traders also take the place of takers, split equally between the orders listed.
+    orders = list(dict.fromkeys(momentum_orders)) if n_momentum_traders else []
+    momentum_traders = [
+        MomentumTrader(agent_id=next(taker_ids), mu=mu, order=orders[i * len(orders) // n_momentum_traders])
+        for i in range(n_momentum_traders)
+    ]
+    trend_reader = TrendReader(momentum_window) if momentum_traders else None
+    typical = {order: TypicalSize() for order in orders}        # each order's typical prediction size
+    recent_mids: deque = deque(maxlen=momentum_window)     # end-of-step mid-prices, for the trend
     provider_turns, taker_turns, value_turns = _turn_lists(providers), _turn_lists(takers), _turn_lists(value_traders)
+    momentum_turns = _turn_lists(momentum_traders)
 
     def acting_agents(turns: List[List[List[int]]], t: int, probability: float) -> List[int]:
         """Fast method: the agents that act in step t. For each type, take the agents whose turn it
@@ -348,35 +386,46 @@ def run_simulation(
                     if rng.random() < delta:
                         book.cancel_order(order_id)
 
-    def takers_act(t: int, q: Optional[float], reference: float) -> int:
+    def takers_act(t: int, q: Optional[float], reference: float, buy_chance: Dict[int, float]) -> int:
         """Returns the number of market orders that were not filled completely (the book side
         they needed was empty, or ran out part-way through a bigger order).
         Also submits the takers orders, under normal conditions failures should stay 0.
         q, if not None, is this step's shared buy probability (asymmetric flow); None means
         each taker uses its own fixed q_taker.
-        Value traders act in this part of the step too, with reference as the asset's true value. Their orders are limit orders, so they are never counted as failures."""
+        Value traders act in this part of the step too, with reference as the asset's true value. Their orders are limit orders, so they are never counted as failures.
+        Momentum traders act here as well; buy_chance gives each order of momentum trader its chance
+        of buying this step. Their market orders count as failures like the takers'."""
         failures = 0
-        if fast and not value_traders:
+        if fast and not value_traders and not momentum_traders:
             for i in acting_agents(taker_turns, t, mu):
                 if takers[i].submit(book, t, rng, q_taker=q) is not OrderResult.EXECUTED:
                     failures += 1
         elif fast:
-            # Takers and value traders act in one random order, so neither always goes first.
-            acting = [(takers[i], False) for i in acting_agents(taker_turns, t, mu)] \
-                + [(value_traders[i], True) for i in acting_agents(value_turns, t, mu)]
+            # Takers, value traders and momentum traders act in one random order, so no group always
+            # goes first.
+            acting = [(takers[i], "taker") for i in acting_agents(taker_turns, t, mu)] \
+                + [(value_traders[i], "value") for i in acting_agents(value_turns, t, mu)] \
+                + [(momentum_traders[i], "momentum") for i in acting_agents(momentum_turns, t, mu)]
             rng.shuffle(acting)
-            for agent, is_value_trader in acting:
-                if is_value_trader:
+            for agent, kind in acting:
+                if kind == "value":
                     agent.submit(book, t, reference)
+                elif kind == "momentum":
+                    if agent.submit(book, t, buy_chance[agent.order], rng) is not OrderResult.EXECUTED:
+                        failures += 1
                 elif agent.submit(book, t, rng, q_taker=q) is not OrderResult.EXECUTED:
                     failures += 1
         else:
-            everyone = takers + value_traders
-            if value_traders:
+            everyone = takers + value_traders + momentum_traders
+            if value_traders or momentum_traders:
                 rng.shuffle(everyone)       # one random order, as in the fast method
             for agent in everyone:
                 if isinstance(agent, ValueTrader):
                     agent.maybe_submit(book, timestamp=t, reference=reference, rng=rng)
+                elif isinstance(agent, MomentumTrader):
+                    outcome = agent.maybe_submit(book, t, buy_chance[agent.order], rng)
+                    if outcome is not None and outcome is not OrderResult.EXECUTED:
+                        failures += 1
                 else:
                     outcome = agent.maybe_submit(book, timestamp=t, rng=rng, q_taker=q)
                     if outcome is not None and outcome is not OrderResult.EXECUTED:
@@ -403,6 +452,7 @@ def run_simulation(
     bid_volume_series, ask_volume_series = np.zeros(n_side, dtype=int), np.zeros(n_side, dtype=int)
     shock_unfilled = 0
     true_value_series = np.empty(n_steps) if value_traders else np.empty(0)
+    trend_series = {order: np.zeros(n_steps) for order in orders}
     # The true value starts where the pre-opening left the market (the start price if the book still
     # has no midpoint). It does not depend on the price after that.
     true_value = book.mid_price()
@@ -420,7 +470,19 @@ def run_simulation(
         cancellation_sweep()                    # 2. Each resting order removed w.p. delta
         if value_traders:
             true_value_series[step] = true_value
-        n_match_failures += takers_act(t, q_now, true_value)    # 3. Takers (and value traders) act
+        buy_chance: Dict[int, float] = {}
+        if momentum_traders:
+            full = len(recent_mids) == momentum_window
+            for order in orders:
+                move = trend_reader.predicted_move(recent_mids, order) if full else 0.0
+                trend_series[order][step] = move
+                size = typical[order]
+                # Compared with the typical size of the earlier predictions, then added to it.
+                warmed_up = size.count >= momentum_window and size.value > 0
+                buy_chance[order] = momentum_buy_probability(move, momentum_scale * size.value) if warmed_up else 0.5
+                if full:
+                    size.add(move)
+        n_match_failures += takers_act(t, q_now, true_value, buy_chance)    # 3. Takers (and value/momentum traders) act
         if value_traders and true_value_step > 0:
             true_value += rng.gauss(0.0, true_value_step)     # news: next step's true value
         if taker_flow is not None:
@@ -435,6 +497,8 @@ def run_simulation(
 
         mid_now = book.mid_price()
         mid_price_series.append(mid_now)
+        if momentum_traders and mid_now is not None:
+            recent_mids.append(mid_now)
         total_orders_series.append(book.total_orders())
         if record_sides:
             best_bid, best_ask = book.best_bid(), book.best_ask()
@@ -477,6 +541,7 @@ def run_simulation(
         shock_unfilled=shock_unfilled,
         true_value_series=true_value_series,
         value_shifts=np.array([v.shift for v in value_traders]),
+        trend_series=trend_series,
     )
 
 
