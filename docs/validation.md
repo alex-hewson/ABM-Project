@@ -409,3 +409,45 @@ The kurtosis looks lower with lumpier agents, but the comparison is not reliable
 paper-scale run of the paper's agents (section 5) gave 6.9–9.4, the same range as the agent types
 here. With 8 runs of 10^5 steps the kurtosis depends on a few very large moves. The other columns
 change little. Volatility clustering, which comes from Eq. 4, is unchanged.
+
+**Agent types of 1, 4 and 16 units together** (Fig. 2 setup, no value traders, agents split equally
+between the three types; 10^5 steps, 8 runs, N_A = 500; `results/types16_*.pkl`,
+`results/meeting/9_agent_types_1_4_16.png`):
+
+| Agents | H(10) | H(100) | H(10^3) | RMS (200 steps) | Kurtosis (200–1600) | Autocorr. of changes | Of their size |
+|---|---|---|---|---|---|---|---|
+| paper's | 0.08 | 0.20 | 0.38 | 19.2 | 2.8–3.0 | −0.38 | 0.08 |
+| providers 1/4/16 | 0.09 | 0.25 | 0.43 | 24.2 | 2.8–3.0 | −0.34 | 0.05 |
+| takers 1/4/16 | 0.12 | 0.25 | 0.46 | 24.6 | 2.8–2.9 | −0.32 | 0.05 |
+| both | 0.12 | 0.27 | 0.45 | 27.1 | 2.9–3.0 | −0.33 | 0.05 |
+
+The larger sizes show the same pattern as the 4-unit types, more strongly: the price moves 26–41%
+more and turns back less at short lags. Still no fat tails, and slightly less volatility clustering.
+Shock test with both mixed (200 runs, `results/shock_types16_both.png`): the price does not recover
+(−41 ticks at the shock for 300 units, against −38 with the paper's agents) and the bid side refills
+with a half-life of 25–30 steps, as before.
+
+## 14. Value trader sweep with the true value: final results
+
+All 49 settings (true value design, D30), cluster, commit e274e66 for the shock tests (recovery
+measured relative to the true value, D25) and c8d0943 for the runs without a shock. Table:
+`results/value_sweep/summary.csv`; figures: `results/meeting/4_sweep_recovery_half_life.png`,
+`5_news_sets_long_run.png`, `10_recovery_vs_density.png`.
+
+- **Recovery speed is set mainly by the share of value traders divided by their mean error**, i.e. how
+  many traders sit near the true value. Across all settings that recovered within 2,000 steps, the
+  half-life goes as (share / error) to the power −0.85 (67 points, both shock sizes). With 20% value
+  traders and a mean error of 50 ticks the half-life is about 90 steps for every amount of news; with
+  10% and 50 ticks about 210. The scatter is larger for weak settings, and settings that never
+  recovered are left out of the fit, so the exponent is only a rough figure.
+- Measuring recovery relative to the true value made the half-lives nearly independent of the news
+  for strong settings (e.g. 20% / 50 ticks: 89, 106, 92, 89 steps for news 0.25, 0.5, 1, 2; on the plain
+  price the last was 122).
+- **Short lags** (H(10), H(100), autocorrelations) match the control except for the strongest settings,
+  where news reaches down to about the recovery time (about 100 steps).
+- **Long lags** follow the news: H(10³–10⁴) below 0.5 for news 0.25–0.5, about the control's for news 1,
+  above 0.5 for news 2.
+- **No fat tails** anywhere: kurtosis 2.75–3.08.
+- With news 1 and strong value traders (20%, 50 ticks) the price recovers half of a crash in about 90
+  steps while its normal-times statistics are nearly those of the model without value traders. This
+  depends on 1 tick of news per step matching the order book's own wandering (D30).
