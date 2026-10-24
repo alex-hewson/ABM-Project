@@ -115,7 +115,9 @@ The plan for the rest of Phase 2 is in `phase2_plan.md`.
 1. Find value trader settings (number, size of errors, amount of news) that give recovery after a shock
    without pinning the price in normal times. The sweep is ready to run on the cluster
    (`experiments/value_sweep.py`, `cluster/value_sweep.slurm`).
-2. Momentum traders are built (D31). Next: momentum and value traders together after a shock, then
+2. Momentum traders are built (D31), and a first shock test with value traders is done
+   (`validation.md`, section 15). A sweep over momentum share, mix of orders and window is ready to
+   run on the cluster (`experiments/momentum_sweep.py`, `cluster/momentum_sweep.slurm`). Next:
    news (jumps in the true value) and a "Poisson trader" (large orders at random times, larger the
    longer since the last), then the scaling of correlation functions and a phase diagram of momentum
    against value traders (supervisors' requests, 20 October 2026).

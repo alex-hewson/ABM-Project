@@ -489,3 +489,24 @@ mostly noise, and the order-2 traders made the bounce stronger instead of follow
   before a fall turns: short trends, then reversals, but little extra movement.
 - No fat tails. With strong order-1 momentum the kurtosis falls well below 3: the price swings in
   long, regular waves instead of making rare large jumps.
+
+**Shock test with momentum and value traders** (250 agents, 200 runs per size; value traders: 50, mean
+error 50, news 1; momentum traders: order 1, window 50; `results/shock_momentum50.png`,
+`shock_value50_momentum50.png`, `shock_value50_momentum100.png`,
+`results/meeting/11_momentum_vs_value_shock.png`). Price relative to the true value, 300-unit sell:
+
+| Market | At the order | Lowest point | Half-life |
+|---|---|---|---|
+| 50 value traders only (sweep) | −37.6 | −37.7 | 92 steps |
+| 50 momentum traders only | −35.1 | −68.6 | never |
+| 50 value + 50 momentum | −38.8 | −45.8, about 45 steps later | 175 steps |
+| 50 value + 100 momentum | −36.0 | −65.2, about 70 steps later | 218 steps |
+
+- Momentum traders keep selling after the order, so the price slides further for 50–70 steps, close
+  to their 50-step window. Without value traders it stays down (the control run also wandered by
+  about 20 ticks, so part of the extra fall is noise).
+- With value traders the fall then turns, the momentum traders follow the new upward trend, and the
+  rebound is steep: a V-shape. With 100 momentum traders the price is back at the old level after
+  about 300 steps, about the same time as with value traders alone, with a slight overshoot.
+- The half-life is measured from the drop at the order, so it does not show the deeper trough or the
+  faster rebound.

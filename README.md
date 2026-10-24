@@ -216,6 +216,23 @@ python -m experiments.value_sweep collect                  # table + figure, res
 
 At the default size it is meant for a cluster: one combination per job (see below).
 
+### Momentum trader sweep
+
+Tries 240 combinations of momentum trader settings: their share of the takers (10%, 25%, 50%), the
+mix of orders (only 1, 2 or 3, a third of each, or two thirds of one and a third of another), the
+window (50, 100, 200, 500 steps), each with and without 20% value traders, plus two controls
+(`experiments/momentum_sweep.py`). It works like the value trader sweep, with its own job script:
+
+```
+python -m experiments.momentum_sweep list
+sbatch --cpus-per-task=16 --time=01:00:00 cluster/momentum_sweep.slurm
+python -m experiments.momentum_sweep collect
+```
+
+`collect` prints a table and draws heatmaps (`results/momentum_sweep/summary_*.png`) of the typical
+price move, the Hurst exponent, the lowest price after a shock, the recovery half-life and the
+kurtosis, one panel per window.
+
 ### Running on a cluster (Slurm)
 
 Once, on the cluster:

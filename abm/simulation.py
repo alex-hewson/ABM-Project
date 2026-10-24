@@ -273,7 +273,8 @@ def run_simulation(
     MomentumTrader in agents.py); 0 (the default) leaves the run exactly as it was. They act at the same
     rate mu. They read the trend from the mid-prices at the end of the last momentum_window steps, and
     momentum_orders says how many derivatives they see (1, 2 or 3); with several orders listed they are
-    split equally between them. A trader buys with probability 1/2 + 1/2 tanh(predicted move /
+    split equally between them (an order listed twice gets twice the share, e.g. (1, 1, 2) is two
+    thirds order 1 and one third order 2). A trader buys with probability 1/2 + 1/2 tanh(predicted move /
     (momentum_scale x typical size)), where the predicted move (in ticks) is the fitted trend carried
     momentum_window steps forward, and the typical size is that of its order's predictions so far
     (see TypicalSize in agents.py). momentum_scale = 1 means a signal of one typical size makes a
@@ -334,12 +335,14 @@ def run_simulation(
         ValueTrader(agent_id=next(taker_ids), mu=mu, shift=draw_value_shift(rng, value_spread))
         for _ in range(n_value_traders)
     ]
-    # Momentum traders also take the place of takers, split equally between the orders listed.
-    orders = list(dict.fromkeys(momentum_orders)) if n_momentum_traders else []
+    # Momentum traders also take the place of takers, split equally between the entries listed. An
+    # order listed twice gets twice the share: (1, 1, 2) is two thirds order 1 and one third order 2.
+    listed = list(momentum_orders) if n_momentum_traders else []
     momentum_traders = [
-        MomentumTrader(agent_id=next(taker_ids), mu=mu, order=orders[i * len(orders) // n_momentum_traders])
+        MomentumTrader(agent_id=next(taker_ids), mu=mu, order=listed[i * len(listed) // n_momentum_traders])
         for i in range(n_momentum_traders)
     ]
+    orders = list(dict.fromkeys(listed))                   # each order once, for reading the trends
     trend_reader = TrendReader(momentum_window) if momentum_traders else None
     typical = {order: TypicalSize() for order in orders}        # each order's typical prediction size
     recent_mids: deque = deque(maxlen=momentum_window)     # end-of-step mid-prices, for the trend
