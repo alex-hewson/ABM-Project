@@ -195,11 +195,20 @@ the price they see. The runner has the same options as `--momentum-fraction` etc
 `docs/decisions.md`, D31).
 
 `--value-traders N` turns N of the 250 takers into value traders. Each has its own estimate of the
-asset's true value, which moves only with news (plus or minus a personal error), buys when the price is
-below it and sells when above. With them the price recovers after a shock:
+asset's true value (plus or minus a personal error), buys when the price is below it and sells when
+above. The true value moves by a small random step every step. With value traders the price recovers
+after a shock:
 
 ```
 python -m experiments.shock --value-traders 125 --out results/shock_value125.png
+```
+
+`--news-chance P` adds news: each step there is a chance P that the true value jumps, by a random size
+around `--news-jump` ticks (30 by default), up or down. It needs value traders. The runner has the same
+options, and stores the time and size of every jump (`docs/decisions.md`, D32):
+
+```
+python -m experiments.run --n-steps 100000 --n-runs 8 --value-fraction 0.2 --news-chance 0.0001 --out results/news.pkl
 ```
 
 ### Value trader sweep

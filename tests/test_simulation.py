@@ -609,6 +609,73 @@ def test_momentum_traders_make_trends_persist():
     check(f"with 100 of them: {with_traders:+.3f}, clearly positive (trends carry on)", with_traders > 0.15)
 
 
+def test_news_settings_are_validated():
+    kwargs = dict(n_steps=10, **VALUE_KWARGS)
+    check("news without value traders rejected (nobody would see it)", raises_value_error(
+        lambda: run_simulation(news_chance=0.01, **kwargs)))
+    check("a chance above 1 rejected", raises_value_error(
+        lambda: run_simulation(n_value_traders=10, news_chance=1.5, **kwargs)))
+    check("a negative jump size rejected", raises_value_error(
+        lambda: run_simulation(n_value_traders=10, news_chance=0.01, news_jump=-1.0, **kwargs)))
+    check("a negative spread of the jumps rejected", raises_value_error(
+        lambda: run_simulation(n_value_traders=10, news_chance=0.01, news_jump_spread=-1.0, **kwargs)))
+
+
+def test_without_news_the_run_is_unchanged_and_nothing_is_recorded():
+    kwargs = dict(n_steps=2000, seed=3, n_value_traders=50, **VALUE_KWARGS)
+    plain = run_simulation(**kwargs)
+    spelled_out = run_simulation(news_chance=0.0, news_jump=99.0, news_jump_spread=7.0, **kwargs)
+    check("news chance 0: the same run, whatever the jump settings", run_fingerprint(plain) == run_fingerprint(spelled_out))
+    check("and no news recorded", len(plain.news_steps) == 0 and len(plain.news_jumps) == 0)
+
+
+def test_news_jumps_come_at_random_times_with_sizes_around_the_mean():
+    """D32: a fixed chance each step, so the gaps between jumps are random with no memory (their spread
+    is about as large as their mean), and each jump is up or down by a size around news_jump."""
+    r = run_simulation(n_steps=40_000, seed=8, n_value_traders=50, true_value_step=0.0,
+                       news_chance=0.01, news_jump=30.0, news_jump_spread=10.0, keep_trades=False, **VALUE_KWARGS)
+    n = len(r.news_steps)
+    check(f"{n} jumps in 40,000 steps at a chance of 0.01, within 15% of 400", abs(n - 400) < 60)
+    gaps = np.diff(r.news_steps)
+    check(f"gaps vary as much as they are long, as with no memory: spread / mean = {gaps.std() / gaps.mean():.2f}, "
+          f"between 0.85 and 1.15", 0.85 < gaps.std() / gaps.mean() < 1.15)
+    sizes = np.abs(r.news_jumps)
+    check(f"sizes: mean {sizes.mean():.1f} within 1.5 of 30, spread {sizes.std():.1f} within 1.5 of 10",
+          abs(sizes.mean() - 30) < 1.5 and abs(sizes.std() - 10) < 1.5)
+    up = int(np.sum(r.news_jumps > 0))
+    check(f"up and down about equally often: {up} of {n} up", abs(up - n / 2) < 3 * np.sqrt(n) / 2)
+    moves = np.diff(r.true_value_series)
+    check("with no small steps, the true value moves only at the jumps, by exactly the jump, from the next step",
+          np.array_equal(np.flatnonzero(moves), r.news_steps[r.news_steps < len(moves)])
+          and np.allclose(moves[r.news_steps[r.news_steps < len(moves)]], r.news_jumps[r.news_steps < len(moves)]))
+
+
+def test_a_run_with_news_is_the_same_as_without_until_the_first_jump():
+    kwargs = dict(n_steps=6000, seed=4, n_value_traders=50, **VALUE_KWARGS)
+    plain = run_simulation(**kwargs)
+    news = run_simulation(news_chance=0.001, **kwargs)
+    first = int(news.news_steps[0])
+    check(f"the first jump comes at the end of step {first}", 0 < first < 5900)
+    check("prices and true value identical up to and including that step",
+          plain.mid_price_series[:first + 1] == news.mid_price_series[:first + 1]
+          and np.array_equal(plain.true_value_series[:first + 1], news.true_value_series[:first + 1]))
+    check("and different afterwards", plain.mid_price_series[first + 1:] != news.mid_price_series[first + 1:])
+
+
+def test_price_follows_the_news():
+    """After a jump the value traders' values move, so the price should move the same way and stay."""
+    moves = []
+    for seed in range(3):
+        r = run_simulation(n_steps=30_000, seed=seed, n_value_traders=125, news_chance=1 / 2000,
+                           keep_trades=False, **VALUE_KWARGS)
+        mid = np.array(r.mid_price_series, dtype=float)
+        for step, jump in zip(r.news_steps, r.news_jumps):
+            if 200 <= step < 30_000 - 1000:
+                moves.append((mid[step + 500:step + 1000].mean() - mid[step - 200:step].mean()) / jump)
+    share = float(np.mean(moves))
+    check(f"over {len(moves)} jumps, the price moves on average {share:.2f} of the jump, between 0.6 and 1.4", 0.6 < share < 1.4)
+
+
 def test_fast_and_per_agent_methods_agree_with_momentum_traders():
     stats = {}
     for method in ("fast", "agents"):

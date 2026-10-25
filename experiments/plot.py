@@ -369,6 +369,9 @@ def describe_settings(config: dict) -> str:
         text += f", provider types {kinds['providers']}, taker types {kinds['takers']}"
     traders = config.get("value_traders")
     text += ", no value traders" if traders is None else f", {traders['fraction']:.0%} value traders"
+    news = config.get("news")
+    if news is not None:
+        text += f", news (chance {news['chance']:g}, jumps of {news['jump']:g})"
     return text
 
 

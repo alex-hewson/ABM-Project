@@ -226,6 +226,20 @@ def test_run_one_with_momentum_traders():
           == {"fraction": 0.2, "orders": [1, 2], "window": 50, "scale": 1.0})
 
 
+def test_run_one_with_news():
+    value = (0.4, 1.0, 50.0)
+    with_traders = run_one((125, 0, 3_000, "symmetric", 0.0, value))
+    spelled_out = run_one((125, 0, 3_000, "symmetric", 0.0, value, ((), ()), (0.0, (1,), 50, 1.0), (0.0, 30.0, 10.0)))
+    news = run_one((125, 0, 3_000, "symmetric", 0.0, value, ((), ()), (0.0, (1,), 50, 1.0), (0.003, 30.0, 10.0)))
+    check("no news written out is the run without news", same_run(with_traders, spelled_out))
+    check("without news no jumps are stored", len(with_traders["news_steps"]) == 0)
+    check("with news the jumps are stored, one size per step",
+          len(news["news_steps"]) > 0 and len(news["news_steps"]) == len(news["news_jumps"]))
+    check("its settings are recorded in the config, None when not used",
+          make_config(1000, {})["news"] is None
+          and make_config(1000, {}, news=(0.0001, 30.0, 10.0))["news"] == {"chance": 0.0001, "jump": 30.0, "spread": 10.0})
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

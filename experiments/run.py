@@ -16,6 +16,8 @@ lambda(t) = lambda_0 (1 + |q(t) - 1/2| / sqrt(<(q - 1/2)^2>) * C), for Fig. 4 (p
 docs/decisions.md, D28), e.g. 0.2 gives 25, 50 and 100 of them for N_A = 125, 250 and 500.
 --true-value-step sets how much the true value they estimate moves each step (news), and
 --value-spread how far apart their estimates are (docs/decisions.md, D30).
+--news-chance P gives each step a chance P that news makes the true value jump (needs value traders;
+docs/decisions.md, D32), by a random size around --news-jump ticks (spread --news-jump-spread).
 
 --provider-types and --taker-types give the agents different speeds and order sizes (abm/agents.py,
 AgentType; docs/decisions.md, D27). Each K is a type that gets a chance to act every K steps and
@@ -39,6 +41,7 @@ Each flow is a separate experiment with its own results file. Every run stores:
       1 to 100 intervals (analysis/autocorr.py), for all five price definitions
     - with a random-walk flow: summary statistics of q_taker, including <(q - 1/2)^2> (Eq. 4)
     - with depth coupling: the mean and largest entry depth lambda(t)
+    - with news: the steps at which the true value jumped, and the jumps
 
 Runs are independent (one seed each), so they are spread over CPU cores. Each run is also saved
 the moment it finishes (see checkpoint.py), so an interrupted experiment can be continued with
@@ -162,6 +165,13 @@ def describe_value_traders(fraction: float, true_value_step: float, spread: floa
     return {"fraction": fraction, "true_value_step": true_value_step, "spread": spread}
 
 
+def describe_news(chance: float, jump: float, spread: float) -> Optional[dict]:
+    """The news settings, as saved in the results file (None when there is no news)."""
+    if chance == 0:
+        return None
+    return {"chance": chance, "jump": jump, "spread": spread}
+
+
 def make_bin_edges(grid_step: float, min_ticks: float = 1.0, max_ticks: float = 50_000.0,
                    n_points: int = 52) -> np.ndarray:
     """Log-spaced |increment| bin edges for a price series that only takes multiples of
@@ -190,13 +200,16 @@ RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
 
 def run_one(job):
     """One independent simulation, reduced to the quantities the figures need.
-    job = (n_agents, seed, n_steps, flow name, depth coupling C_lambda, value traders, agent types).
-    value traders = (share of the takers, true value step, mean shift); agent types = (provider
-    kinds, taker kinds), see split_into_types. Both can be left off the job, which means none."""
+    job = (n_agents, seed, n_steps, flow name, depth coupling C_lambda, value traders, agent types,
+    momentum traders, news). value traders = (share of the takers, true value step, mean shift);
+    agent types = (provider kinds, taker kinds), see split_into_types; news = (chance per step, mean
+    jump, spread of the jumps). The parts after the depth coupling can be left off the job, which
+    means none."""
     n_agents, seed, n_steps, flow_name, depth_coupling, *rest = job
     value_fraction, true_value_step, value_spread = rest[0] if rest else (0.0, 1.0, 50.0)
     provider_kinds, taker_kinds = rest[1] if len(rest) > 1 else ((), ())
     momentum_fraction, momentum_orders, momentum_window, momentum_scale = rest[2] if len(rest) > 2 else (0.0, (1,), 50, 1.0)
+    news_chance, news_jump, news_jump_spread = rest[3] if len(rest) > 3 else (0.0, 30.0, 10.0)
     n_value_traders = round(value_fraction * n_agents)
     n_momentum_traders = round(momentum_fraction * n_agents)
     flow = make_flow(flow_name)                 # fresh for this run
@@ -213,6 +226,9 @@ def run_one(job):
         n_value_traders=n_value_traders,
         true_value_step=true_value_step,
         value_spread=value_spread,
+        news_chance=news_chance,
+        news_jump=news_jump,
+        news_jump_spread=news_jump_spread,
         provider_mix=split_into_types(provider_kinds, n_agents),
         taker_mix=split_into_types(taker_kinds, n_agents - n_value_traders - n_momentum_traders),
         n_momentum_traders=n_momentum_traders,
@@ -268,18 +284,20 @@ def run_one(job):
         "price_path": mid_path if (n_agents == PATH_AGENTS and seed == 0) else None,   # mid-price
         "q_stats": q_stats,            # None for the symmetric flow
         "lambda_stats": lambda_stats,  # None unless the entry depth follows Eq. 4
+        "news_steps": result.news_steps,   # steps at the end of which the true value jumped (empty without news)
+        "news_jumps": result.news_jumps,   # each jump, in ticks
     }
 
 
 # Settings that must match for saved runs to be combined with new ones.
 CHECKED_SETTINGS = ("format", "n_steps", "params", "return_bin_edges", "depth_window",
                     "price_definitions", "lag_points", "flow", "entry_depth", "value_traders", "agent_types",
-                    "momentum_traders")
+                    "momentum_traders", "news")
 
 
 def make_config(n_steps: int, git: dict, flow_name: str = "symmetric", depth_coupling: float = 0.0,
                 value: tuple = (0.0, 1.0, 50.0), types: tuple = ((), ()),
-                momentum: tuple = (0.0, (1,), 50, 1.0)) -> dict:
+                momentum: tuple = (0.0, (1,), 50, 1.0), news: tuple = (0.0, 30.0, 10.0)) -> dict:
     """The settings that define an experiment; saved with the results and checked on --resume.
     value = (share of the takers that are value traders, true value step, mean shift)."""
     return {"format": RESULTS_FORMAT, "n_steps": n_steps, "params": PARAMS,
@@ -289,6 +307,7 @@ def make_config(n_steps: int, git: dict, flow_name: str = "symmetric", depth_cou
             "value_traders": describe_value_traders(*value),
             "agent_types": describe_agent_types(*types),
             "momentum_traders": describe_momentum_traders(*momentum),
+            "news": describe_news(*news),
             "autocorr": {"interval": AUTOCORR_INTERVAL, "max_lag": AUTOCORR_MAX_LAG},
             "git": git}
 
@@ -305,6 +324,12 @@ def main(argv=None):
                         help="how much the true value moves each step: the standard deviation, in ticks (default 1)")
     parser.add_argument("--value-spread", type=float, default=50.0,
                         help="mean distance of a value trader's own value from the true value, in ticks (default 50)")
+    parser.add_argument("--news-chance", type=float, default=0.0,
+                        help="chance each step that news makes the true value jump, e.g. 0.0001 (default 0: none)")
+    parser.add_argument("--news-jump", type=float, default=30.0,
+                        help="mean size of a news jump, in ticks (default 30)")
+    parser.add_argument("--news-jump-spread", type=float, default=10.0,
+                        help="standard deviation of the jump size, in ticks (default 10)")
     parser.add_argument("--n-steps", type=int, default=1_000_000)
     parser.add_argument("--n-runs", type=int, default=50, help="runs per N_A")
     parser.add_argument("--momentum-fraction", type=float, default=0.0,
@@ -343,6 +368,13 @@ def main(argv=None):
     if not (0 <= args.momentum_fraction <= 1) or args.momentum_fraction + args.value_fraction > 1:
         raise SystemExit("--momentum-fraction must be between 0 and 1, and together with --value-fraction at most 1")
     momentum = (args.momentum_fraction, tuple(args.momentum_orders), args.momentum_window, args.momentum_scale)
+    if not (0 <= args.news_chance <= 1):
+        raise SystemExit("--news-chance must be between 0 and 1")
+    if args.news_chance > 0 and args.value_fraction == 0:
+        raise SystemExit("--news-chance needs --value-fraction: news moves the true value, which only value traders see")
+    if args.news_jump < 0 or args.news_jump_spread < 0:
+        raise SystemExit("--news-jump and --news-jump-spread must be 0 or more")
+    news = (args.news_chance, args.news_jump, args.news_jump_spread)
     if args.out is None:
         suffix = f"_c{args.depth_coupling:g}" if args.depth_coupling > 0 else ""
         suffix += f"_v{args.value_fraction:g}" if args.value_fraction > 0 else ""
@@ -350,7 +382,7 @@ def main(argv=None):
 
     # Captured before the runs start, so it describes the code the workers actually load.
     git = git_info()
-    config = make_config(args.n_steps, git, args.flow, args.depth_coupling, value, types, momentum)
+    config = make_config(args.n_steps, git, args.flow, args.depth_coupling, value, types, momentum, news)
 
     parts_dir = parts_dir_for(args.out)
     if has_parts(parts_dir) and not args.resume:
@@ -411,6 +443,10 @@ def main(argv=None):
     print("value traders: none" if traders is None else
           f"value traders: {traders['fraction']:.0%} of the takers (true value step {traders['true_value_step']:g}, "
           f"mean shift {traders['spread']:g} ticks)")
+    news_settings = config["news"]
+    print("news: none" if news_settings is None else
+          f"news: chance {news_settings['chance']:g} per step, jumps of {news_settings['jump']:g} "
+          f"+- {news_settings['spread']:g} ticks")
     print(f"{len(all_keys)} runs ({args.n_runs} per N_A in {tuple(args.agent_counts)}), {args.n_steps:,} steps each, "
           f"{args.workers} workers")
     print(f"code version: {describe(config['git'])}")
@@ -425,7 +461,7 @@ def main(argv=None):
     if todo:
         with ProcessPoolExecutor(max_workers=args.workers) as pool:
             futures = [pool.submit(run_one, (n, seed, args.n_steps, args.flow, args.depth_coupling, value, types,
-                                                   momentum))
+                                                   momentum, news))
                        for n, seed in todo]
             try:
                 for count, future in enumerate(as_completed(futures), n_already + 1):

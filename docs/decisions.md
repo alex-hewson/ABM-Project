@@ -240,6 +240,35 @@ Suggested by the finance supervisor as a main factor in flash crashes.
 With no momentum traders the model is exactly as before: runs with value traders, agent types and a
 shock give the same numbers as before momentum traders were added.
 
+**D32. News: jumps in the true value at random times. [Assumed]**
+Asked for by the supervisors (20 October 2026), as the "information" kind of news. The "pressure"
+kind, large orders at random times, is a separate agent.
+- Each step there is a fixed chance of news, 1 in 10,000 by default, whatever happened before. So
+  news comes once per 10,000 steps on average, but the gaps are random: sometimes two jumps come
+  close together, sometimes there is a long quiet spell.
+- A jump moves the true value (D30) up or down with equal chance. Its size is random around 30
+  ticks: drawn from a normal distribution with mean 30 and standard deviation 10, so almost all
+  jumps are between 10 and 50 ticks. 30 is the same order as the impact of the 300-unit shock
+  (about 37 ticks), so the two can be compared. Mean and spread are placeholders.
+- The jump happens at the same point as the small step of D30, after the takers. All value traders
+  know the new value from the next step on. Momentum traders and the basic agents only see the
+  price, as before. The jump times are recorded.
+- The small random walk of D30 stays. It is now read as short-term uncertainty about the value, not
+  as news. "News" from here on means these jumps.
+- **Why random times:** news that can only come at fixed times (e.g. every 10,000 steps) would give
+  the price a built-in rhythm at that lag, which would show up in the Hurst exponent and the
+  correlation functions. Features there could then come from the timetable, not the agents. No
+  agent in the model looks at the clock, so a timetable would add nothing they react to. Random
+  times at a constant rate are also the usual assumption in models with price jumps (e.g. Merton,
+  1976).
+- **Other option, not used: scheduled news.** Real markets also have news at known times, e.g. US
+  economic data released at 8:30 New York time, which moves E-mini futures. A fixed timetable also
+  keeps jumps apart, which makes averaging around them cleaner. With random times, jumps that land
+  before the price has settled from the last one are left out of the averages instead. Scheduled
+  news can be added as an option if the E-mini data shows it matters.
+
+With no news (chance 0) the model is exactly as before.
+
 ---
 
 ## 5. Still open
@@ -254,6 +283,8 @@ shock give the same numbers as before momentum traders were added.
   takers' buy probability. Real markets have them, so the E-mini comparison will need a source of fat
   tails, e.g. providers that place orders further away when recent volatility is high. The true value
   design has not been tried in the Fig. 4 model yet.
+- **News settings (D32).** The chance per step and the jump size are placeholders. Whether news
+  should also come at scheduled times is to be checked against the E-mini data.
 - **Momentum trader scale (D31).** Whether to keep scaling each trader's signal by its own typical
   size, or use a fixed scale.
 - **Where the order book hands over to news.** Up to some time scale the price's randomness is the

@@ -106,6 +106,10 @@ class SimulationResult:
     # Value traders (filled only if run_simulation had n_value_traders above 0): the asset's true value
     # in each step, and each trader's own fixed error (shift) in estimating it.
     true_value_series: np.ndarray = field(default_factory=lambda: np.empty(0))
+    # News (filled only if run_simulation had news_chance above 0): the steps at the end of which the
+    # true value jumped, and each jump in ticks (+ up, - down).
+    news_steps: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=int))
+    news_jumps: np.ndarray = field(default_factory=lambda: np.empty(0))
     # Momentum traders (filled only if run_simulation had n_momentum_traders above 0): for each order of
     # trader present, the price move it predicted in each step (0 until the window has filled).
     trend_series: Dict[int, np.ndarray] = field(default_factory=dict)
@@ -199,6 +203,9 @@ def run_simulation(
     n_value_traders: int = 0,
     true_value_step: float = 1.0,
     value_spread: float = 50.0,
+    news_chance: float = 0.0,
+    news_jump: float = 30.0,
+    news_jump_spread: float = 10.0,
     n_momentum_traders: int = 0,
     momentum_orders: Sequence[int] = (2,),
     momentum_window: int = 50,
@@ -264,10 +271,19 @@ def run_simulation(
     number of orders per step is unchanged. They all estimate the asset's true value, which does not
     depend on the price: it starts at the midpoint at the end of the pre-opening, then moves like a
     random walk, by a normally distributed step with standard deviation true_value_step ticks each
-    step (news; 0 means no news). Each trader's own value is the true value plus a fixed error, + or -
+    step (short-term uncertainty about the value; 0 means none). Each trader's own value is the true value plus a fixed error, + or -
     with equal chance and exponentially distributed with mean value_spread ticks. If taker_mix is given
     with value traders, it must add up to the takers that are left, n_agents - n_value_traders. The
     true value in each step is returned in result.true_value_series.
+
+    news_chance (needs value traders) is the chance, each step, that news makes the true value jump
+    (docs/decisions.md, D32); 0 (the default) leaves the run exactly as it was. The chance is the same
+    every step, whatever happened before, so news comes once per 1 / news_chance steps on average at
+    random times. A jump is up or down with equal chance, and its size is normally distributed with
+    mean news_jump and standard deviation news_jump_spread ticks (its absolute value is taken). It
+    happens after the takers, like the small step, so value traders act on it from the next step.
+    News has its own random numbers, so a run with news is the same as without it up to the first
+    jump. The steps and the jumps are returned in result.news_steps and result.news_jumps.
 
     n_momentum_traders turns that many of the remaining takers into momentum traders (see
     MomentumTrader in agents.py); 0 (the default) leaves the run exactly as it was. They act at the same
@@ -299,6 +315,12 @@ def run_simulation(
         raise ValueError(f"n_value_traders must be between 0 and n_agents = {n_agents}")
     if true_value_step < 0:
         raise ValueError("true_value_step must be 0 or more")
+    if not (0 <= news_chance <= 1):
+        raise ValueError("news_chance must be between 0 and 1")
+    if news_chance > 0 and n_value_traders == 0:
+        raise ValueError("news_chance needs value traders: news moves the true value, which only they see")
+    if news_jump < 0 or news_jump_spread < 0:
+        raise ValueError("news_jump and news_jump_spread must be 0 or more")
     if n_momentum_traders < 0 or n_value_traders + n_momentum_traders > n_agents:
         raise ValueError(f"value and momentum traders together must be between 0 and n_agents = {n_agents}")
     if n_momentum_traders and (not momentum_orders or any(o not in (1, 2, 3) for o in momentum_orders)):
@@ -313,6 +335,8 @@ def run_simulation(
     check_stability_condition(alpha, mu, delta)
 
     rng = random.Random(seed)
+    # News draws from its own stream, so the main one is the same with or without news.
+    news_rng = random.Random(None if seed is None else f"news-{seed}")
     step_trade_prices: List[int] = []     # prices of the trades in the current step
     book = OrderBook(keep_trades=keep_trades,
                      on_trade=step_trade_prices.append if record_trade_prices else None)
@@ -455,6 +479,8 @@ def run_simulation(
     bid_volume_series, ask_volume_series = np.zeros(n_side, dtype=int), np.zeros(n_side, dtype=int)
     shock_unfilled = 0
     true_value_series = np.empty(n_steps) if value_traders else np.empty(0)
+    news_steps: List[int] = []
+    news_jumps: List[float] = []
     trend_series = {order: np.zeros(n_steps) for order in orders}
     # The true value starts where the pre-opening left the market (the start price if the book still
     # has no midpoint). It does not depend on the price after that.
@@ -487,7 +513,13 @@ def run_simulation(
                     size.add(move)
         n_match_failures += takers_act(t, q_now, true_value, buy_chance)    # 3. Takers (and value/momentum traders) act
         if value_traders and true_value_step > 0:
-            true_value += rng.gauss(0.0, true_value_step)     # news: next step's true value
+            true_value += rng.gauss(0.0, true_value_step)     # short-term uncertainty: next step's true value
+        if news_chance > 0 and news_rng.random() < news_chance:
+            # News (D32): a jump of random size around news_jump ticks, up or down with equal chance.
+            jump = abs(news_rng.gauss(news_jump, news_jump_spread)) * news_rng.choice((1, -1))
+            true_value += jump
+            news_steps.append(step)
+            news_jumps.append(jump)
         if taker_flow is not None:
             q_taker_series[step] = q_now
             taker_flow.advance(rng)             # next step's value; step 0 used the starting value
@@ -543,6 +575,8 @@ def run_simulation(
         ask_volume_series=ask_volume_series,
         shock_unfilled=shock_unfilled,
         true_value_series=true_value_series,
+        news_steps=np.array(news_steps, dtype=int),
+        news_jumps=np.array(news_jumps, dtype=float),
         value_shifts=np.array([v.shift for v in value_traders]),
         trend_series=trend_series,
     )

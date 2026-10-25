@@ -30,6 +30,9 @@ in ticks):
 
     python -m experiments.shock --value-traders 125 --out results/shock_value125.png
 
+--news-chance, --news-jump and --news-jump-spread add news, jumps in the true value at random times,
+as in experiments/run.py (docs/decisions.md, D32). They need value traders.
+
 --momentum-traders N turns N of the takers into momentum traders (abm/agents.py, MomentumTrader),
 which follow the trend of the last --momentum-window mid-prices; --momentum-orders and
 --momentum-scale as in experiments/run.py. Value and momentum traders can be combined:
@@ -115,10 +118,12 @@ def run_one(task):
     size, seed, warmup, after, buy, provider_mix, taker_mix, value, *more = task
     n_value_traders, true_value_step, value_spread = value
     n_momentum_traders, momentum_orders, momentum_window, momentum_scale = more[0] if more else (0, (1,), 50, 1.0)
+    news_chance, news_jump, news_jump_spread = more[1] if len(more) > 1 else (0.0, 30.0, 10.0)
     shock = Shock(step=warmup, size=size, side=Side.BID if buy else Side.ASK) if size > 0 else None
     r = run_simulation(n_agents=N_AGENTS, n_steps=warmup + after + 1, seed=seed, shock=shock,
                        record_sides=True, keep_trades=False, provider_mix=provider_mix, taker_mix=taker_mix,
                        n_value_traders=n_value_traders, true_value_step=true_value_step, value_spread=value_spread,
+                       news_chance=news_chance, news_jump=news_jump, news_jump_spread=news_jump_spread,
                        n_momentum_traders=n_momentum_traders, momentum_orders=momentum_orders,
                        momentum_window=momentum_window, momentum_scale=momentum_scale,
                        **PARAMS)
@@ -225,6 +230,12 @@ def main(argv=None):
                         help="how much the true value moves each step: the standard deviation, in ticks (default 1)")
     parser.add_argument("--value-spread", type=float, default=50.0,
                         help="mean distance of a value trader's own value from the true value, in ticks (default 50)")
+    parser.add_argument("--news-chance", type=float, default=0.0,
+                        help="chance each step that news makes the true value jump, e.g. 0.0001 (default 0: none)")
+    parser.add_argument("--news-jump", type=float, default=30.0,
+                        help="mean size of a news jump, in ticks (default 30)")
+    parser.add_argument("--news-jump-spread", type=float, default=10.0,
+                        help="standard deviation of the jump size, in ticks (default 10)")
     parser.add_argument("--momentum-traders", type=int, default=0,
                         help="how many of the takers are momentum traders (default 0)")
     parser.add_argument("--momentum-orders", type=int, nargs="+", default=[1], choices=(1, 2, 3),
@@ -251,9 +262,14 @@ def main(argv=None):
             parser.error(f"{name}: the counts must add up to {total}, got {sum(mix.values())}")
     value = (args.value_traders, args.true_value_step, args.value_spread)
     momentum = (args.momentum_traders, tuple(args.momentum_orders), args.momentum_window, args.momentum_scale)
+    if not (0 <= args.news_chance <= 1) or args.news_jump < 0 or args.news_jump_spread < 0:
+        parser.error("--news-chance must be between 0 and 1, and --news-jump and --news-jump-spread 0 or more")
+    if args.news_chance > 0 and args.value_traders == 0:
+        parser.error("--news-chance needs --value-traders: news moves the true value, which only value traders see")
+    news = (args.news_chance, args.news_jump, args.news_jump_spread)
 
     sizes = sorted(set(args.sizes))
-    tasks = [(size, seed, args.warmup, args.after, args.buy, provider_mix, taker_mix, value, momentum)
+    tasks = [(size, seed, args.warmup, args.after, args.buy, provider_mix, taker_mix, value, momentum, news)
              for size in sizes for seed in range(args.n_runs)]
     config = dict(sizes=sizes, n_runs=args.n_runs, warmup=args.warmup, after=args.after, buy=args.buy,
                   n_agents=N_AGENTS, params=PARAMS, git=git_info(),
@@ -263,6 +279,9 @@ def main(argv=None):
                   value_spread=args.value_spread,
                   value_traders=f"{args.value_traders} value traders (true value step {args.true_value_step:g}, "
                                 f"spread {args.value_spread:g})",
+                  news_chance=args.news_chance, news_jump=args.news_jump, news_jump_spread=args.news_jump_spread,
+                  news=f"news: chance {args.news_chance:g} per step, jumps of {args.news_jump:g} "
+                       f"+- {args.news_jump_spread:g} ticks",
                   n_momentum_traders=args.momentum_traders, momentum_orders=list(args.momentum_orders),
                   momentum_window=args.momentum_window, momentum_scale=args.momentum_scale,
                   momentum_traders=f"{args.momentum_traders} momentum traders (orders {list(args.momentum_orders)}, "
@@ -270,7 +289,8 @@ def main(argv=None):
     print(f"{len(tasks)} runs: sizes {sizes}, {args.n_runs} runs each, code version {describe(config['git'])}\n"
           f"providers: {config['providers']}\ntakers:    {config['takers']}"
           + (f"\nplus:      {config['value_traders']}" if args.value_traders else "")
-          + (f"\nplus:      {config['momentum_traders']}" if args.momentum_traders else ""), flush=True)
+          + (f"\nplus:      {config['momentum_traders']}" if args.momentum_traders else "")
+          + (f"\nplus:      {config['news']}" if args.news_chance else ""), flush=True)
 
     start = time.perf_counter()
     windows = {size: {q: [] for q in QUANTITIES} for size in sizes}
