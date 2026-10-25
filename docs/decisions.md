@@ -250,6 +250,11 @@ kind, large orders at random times, is a separate agent.
   ticks: drawn from a normal distribution with mean 30 and standard deviation 10, so almost all
   jumps are between 10 and 50 ticks. 30 is the same order as the impact of the 300-unit shock
   (about 37 ticks), so the two can be compared. Mean and spread are placeholders.
+- The jumps are also smaller than the value traders' typical error (mean 50 ticks, D28). So a jump
+  moves only some traders' values to the other side of the price, and the rest still disagree
+  about which way it should go. A jump much larger than the spread puts every value trader on the
+  same side at once, which is closer to a crash than to ordinary news. Results here hold for news
+  inside the spread; larger news may behave differently and has not been tested.
 - The jump happens at the same point as the small step of D30, after the takers. All value traders
   know the new value from the next step on. Momentum traders and the basic agents only see the
   price, as before. The jump times are recorded.
@@ -268,6 +273,29 @@ kind, large orders at random times, is a separate agent.
   news can be added as an option if the E-mini data shows it matters.
 
 With no news (chance 0) the model is exactly as before.
+
+**D33. How the response to news is measured: an event study. [Assumed]**
+News comes at random times inside long runs, so instead of one shock per run, every jump is lined
+up and the price around it averaged (`experiments/news.py`, `analysis/events.py`).
+- Step 0 is the first step in which value traders know the new value. The window runs from 200
+  steps before to 2,000 after.
+- Only jumps with no other jump in their window are used, and none in the first 2,000 steps, while
+  the market settles. So each average shows one piece of news at a time. The news chance in the event
+  study is 1 in 5,000 steps (twice the default rate) so that each run has more jumps; about 60% of
+  them are used.
+- Each window is flipped so the jump points up, the windows are averaged in ticks, and the average
+  is divided by the mean jump size. The level before is the mean of the 200 steps before, as in D25.
+  Dividing each window by its own jump instead was tried first: one jump of 0.15 ticks multiplied
+  its own noise by about 200 and swamped the average of 405 jumps.
+- What is measured is the gap between the price and the true value, as in D25. Right after the news
+  it is about −1 jump; it goes back to 0 once the price has taken the news in. 1 + gap (from the
+  news on) is the share of the jump taken in. The plain price change would show the same on average, but the small steps
+  of the true value move it by about 45 ticks over 2,000 steps, more than a jump, which drowns it.
+- Numbers read off: the share taken in during step 0, steps until half and 90% is taken in, the
+  largest share (above 1 = overshoot) and when, and the share at the end of the window.
+- This assumes the response is proportional to the jump. Whether big jumps are taken in the same way
+  as small ones has not been checked, in particular jumps larger than the value traders' spread
+  (D32).
 
 ---
 

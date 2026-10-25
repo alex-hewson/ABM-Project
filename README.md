@@ -211,6 +211,18 @@ options, and stores the time and size of every jump (`docs/decisions.md`, D32):
 python -m experiments.run --n-steps 100000 --n-runs 8 --value-fraction 0.2 --news-chance 0.0001 --out results/news.pkl
 ```
 
+### News event study
+
+Long runs with news, then the price around every jump is lined up and averaged: how fast the price
+takes in the news, and whether it overshoots (`docs/decisions.md`, D33). It takes the same agent
+options as the shock test. Each `run` saves one market; `plot` draws several together:
+
+```
+python -m experiments.news run --value-traders 50 --out results/news/value50.pkl
+python -m experiments.news run --value-traders 50 --momentum-traders 50 --out results/news/value50_mom50.pkl
+python -m experiments.news plot --data results/news/value50.pkl results/news/value50_mom50.pkl --labels "value" "value + momentum" --out results/news/compare.png
+```
+
 ### Value trader sweep
 
 Tries 48 combinations of value trader settings (share of takers, amount of news, mean error), plus a control

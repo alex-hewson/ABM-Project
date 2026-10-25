@@ -510,3 +510,32 @@ error 50, news 1; momentum traders: order 1, window 50; `results/shock_momentum5
   about 300 steps, about the same time as with value traders alone, with a slight overshoot.
 - The half-life is measured from the drop at the order, so it does not show the deeper trough or the
   faster rebound.
+
+## 16. News event study (first look)
+
+News jumps (D32) inside long runs, averaged around every jump (D33). 250 agents, 50 value traders
+(mean error 50, small step 1), momentum traders of order 1 with window 50, jumps of 30 ± 10 ticks at
+a chance of 1 in 5,000 per step. 64 runs of 50,000 steps per market; 405 of 696 jumps used. News has
+its own random numbers, so all three markets have the same jumps at the same times
+(`results/news/compare.png`). Share of the jump taken into the price:
+
+| Market | Step 0 | Half-way | 90% | Largest (when) | End |
+|---|---|---|---|---|---|
+| 50 value only | 0.04 | 114 steps | 441 steps | no overshoot | 0.97 |
+| 50 value + 50 momentum | 0.01 | 76 steps | 250 steps | no clear overshoot | 0.96 |
+| 50 value + 100 momentum | 0.04 | 70 steps | 127 steps | 1.18 (about 240 steps) | 0.99 |
+
+- In every market the price takes in the whole jump and stays there. After news the price moves to
+  a new level; after a shock (section 15) it comes back. The model tells the two apart.
+- Almost nothing happens in the first step. The value traders who now disagree with the price trade
+  at the rate μ, so the price moves over tens of steps, not at once.
+- For the first 50 steps all three curves are the same. The momentum traders' window is 50 steps, so
+  they only see the new trend once it has built up. After that they speed the move up: 90% is
+  reached 1.8 times faster with 50 of them and 3.5 times faster with 100.
+- With 100 momentum traders the price overshoots by about 18% of the jump, peaking about 240 steps
+  after the news, and is back at the new value by about 450 steps.
+- Together with section 15: momentum traders push the price further in whatever direction it is
+  already going. After news that is towards the new value, so they help, with some overshoot. After
+  a large order it is away from the value, so they deepen the fall.
+- The "largest" value in the summary table is read off a noisy curve. Without momentum traders its
+  maximum (1.05 at step 1,034) is noise, not an overshoot.
