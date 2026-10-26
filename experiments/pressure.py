@@ -44,14 +44,25 @@ from analysis.events import clean_events, signed_window
 from analysis.recovery import mean_response, recovered_fraction, time_to_recover
 from experiments.provenance import git_info, describe
 from experiments.run import PARAMS
-from experiments.shock import N_AGENTS, parse_mix, describe_mix
+from experiments.shock import N_AGENTS, parse_mix, describe_mix     # N_AGENTS: the default N_A
 
 BEFORE = 200          # steps shown (and averaged for the "before" level) ahead of each order
 TAIL = 200            # the "end" level is the mean of this many final steps
 LOWEST_WITHIN = 500   # the lowest point is looked for in this many steps after the order
-BANDS = (0, 150, 400, np.inf)     # order size bands, in units
-FIT_SIZES = (30, 500)             # sizes the impact power is fitted over: below 30 the impact is lost in the
-                                  # noise; above 500 orders start to empty a side of the book (N_A = 250)
+# Order size bands and the sizes the impact power is fitted over, in units per agent, so that they
+# scale with the book (which holds about 2.4 units per agent on each side). At N_A = 250 the bands are
+# 0-150, 150-400 and 400+ units, and the fit runs from 30 units (below that the impact is lost in the
+# noise) to 500 (above that orders start to empty a side of the book).
+BANDS_PER_AGENT = (0, 0.6, 1.6, np.inf)
+FIT_PER_AGENT = (0.12, 2.0)
+
+
+def bands_for(n_agents: int):
+    return [b * n_agents for b in BANDS_PER_AGENT]
+
+
+def fit_sizes_for(n_agents: int):
+    return tuple(round(f * n_agents) for f in FIT_PER_AGENT)
 
 
 def band_name(low, high) -> str:
@@ -60,11 +71,11 @@ def band_name(low, high) -> str:
 
 def run_one(task):
     """One long run: the window around every clean order in it, with the order's size."""
-    (seed, n_steps, warmup, after, provider_mix, taker_mix, value, momentum, poisson) = task
+    (n_agents, seed, n_steps, warmup, after, provider_mix, taker_mix, value, momentum, poisson) = task
     n_value_traders, true_value_step, value_spread = value
     n_momentum_traders, momentum_orders, momentum_window, momentum_scale = momentum
     poisson_chance, poisson_rate = poisson
-    r = run_simulation(n_agents=N_AGENTS, n_steps=n_steps, seed=seed, keep_trades=False,
+    r = run_simulation(n_agents=n_agents, n_steps=n_steps, seed=seed, keep_trades=False,
                        provider_mix=provider_mix, taker_mix=taker_mix,
                        n_value_traders=n_value_traders, true_value_step=true_value_step, value_spread=value_spread,
                        poisson_chance=poisson_chance, poisson_rate=poisson_rate,
@@ -98,9 +109,9 @@ def band_summary(curve: np.ndarray) -> dict:
     }
 
 
-def impact_power(sizes: np.ndarray, impacts: np.ndarray):
+def impact_power(sizes: np.ndarray, impacts: np.ndarray, n_agents: int):
     """Mean impact in log-spaced size bins, and the power of a fit impact = A x size^power through the
-    bins between FIT_SIZES. Returns (bin centres, mean impact per bin, which bins were fitted, power),
+    bins between fit_sizes_for(n_agents). Returns (bin centres, mean impact per bin, which bins were fitted, power),
     impact as a positive number of ticks."""
     ok = np.isfinite(impacts)
     sizes, falls = sizes[ok], -impacts[ok]
@@ -112,7 +123,8 @@ def impact_power(sizes: np.ndarray, impacts: np.ndarray):
             centres.append(float(np.sqrt(low * high)))
             means.append(float(falls[inside].mean()))
     centres, means = np.array(centres), np.array(means)
-    fitted = (centres >= FIT_SIZES[0]) & (centres <= FIT_SIZES[1])
+    low, high = fit_sizes_for(n_agents)
+    fitted = (centres >= low) & (centres <= high)
     power = float(np.polyfit(np.log(centres[fitted]), np.log(means[fitted]), 1)[0]) if fitted.sum() >= 3 else float("nan")
     return centres, means, fitted, power
 
@@ -131,8 +143,10 @@ def print_summaries(labels, datas):
             s = band_summary(band["mean"])
             print(f"{label:<{width}} | {name:>8} {band['n']:>7} {band['mean_size']:>9.0f} {band['emptied']:>7} | "
                   + " ".join(f"{fmt(s[k]):>9}" for k in keys))
-        _, _, _, power = impact_power(data["sizes"], data["impacts"])
-        print(f"{label:<{width}} | impact grows like size^{power:.2f} between {FIT_SIZES[0]} and {FIT_SIZES[1]} units "
+        n_agents = data["config"]["n_agents"]
+        _, _, _, power = impact_power(data["sizes"], data["impacts"], n_agents)
+        low, high = fit_sizes_for(n_agents)
+        print(f"{label:<{width}} | impact grows like size^{power:.2f} between {low} and {high} units "
               f"({data['n_used']} of {data['n_orders']} orders used)")
     print("\nIn ticks, every order shown as a sell (relative to the true value when there are value traders). "
           "'emptied' = orders that\nemptied the other side of the book; 'lowest' = within 500 steps; 'half-life' = "
@@ -144,7 +158,7 @@ def plot(labels, datas, out):
     fig, axes = plt.subplots(len(datas), 2, figsize=(13, 4.2 * len(datas)), squeeze=False)
     for (ax_curve, ax_size), label, data in zip(axes, labels, datas):
         t = data["t"]
-        for colour, (name, band) in enumerate(data["bands"].items()):
+        for colour, (name, band) in enumerate((n, b) for n, b in data["bands"].items() if n != "all"):
             mean, err = band["mean"], band["error"]
             ax_curve.plot(t, mean, color=f"C{colour}", lw=0.9,
                           label=f"{name} units ({band['n']} orders, mean {band['mean_size']:.0f})")
@@ -152,17 +166,19 @@ def plot(labels, datas, out):
         ax_curve.axhline(0, color="gray", lw=0.5, ls=":")
         ax_curve.axvline(0, color="gray", lw=0.5, ls=":")
         what = "price minus true value" if data["config"]["n_value_traders"] else "mid-price"
-        ax_curve.set(title=f"{label}: {what} after an order (shown as a sell)",
+        ax_curve.set(title=f"{label} (N$_A$={data['config']['n_agents']}): {what} after an order (shown as a sell)",
                      xlabel="steps since the order", ylabel="change [ticks]")
         ax_curve.title.set_fontsize(9)
         ax_curve.legend(fontsize=8)
 
         ok = np.isfinite(data["impacts"])
         ax_size.scatter(data["sizes"][ok], -data["impacts"][ok], s=6, alpha=0.3, color="gray", label="each order")
-        centres, means, fitted, power = impact_power(data["sizes"], data["impacts"])
+        n_agents = data["config"]["n_agents"]
+        centres, means, fitted, power = impact_power(data["sizes"], data["impacts"], n_agents)
+        low, high = fit_sizes_for(n_agents)
         ax_size.plot(centres, means, "o-", color="C3", mfc="white", label="mean per size bin")
         ax_size.plot(centres[fitted], means[fitted], "o", color="C3",
-                     label=f"fitted ({FIT_SIZES[0]}-{FIT_SIZES[1]} units): size$^{{{power:.2f}}}$")
+                     label=f"fitted ({low}-{high} units): size$^{{{power:.2f}}}$")
         if fitted.sum() >= 3:
             ref = means[fitted][0] * np.sqrt(centres / centres[fitted][0])
             ax_size.plot(centres, ref, color="gray", lw=0.8, ls="--", label="size$^{0.5}$, for comparison")
@@ -171,7 +187,7 @@ def plot(labels, datas, out):
         ax_size.title.set_fontsize(9)
         ax_size.legend(fontsize=8)
     first = datas[0]["config"]
-    fig.suptitle(f"Poisson trader event study: N$_A$={N_AGENTS}, chance {first['poisson_chance']:g} per step, "
+    fig.suptitle(f"Poisson trader event study: chance {first['poisson_chance']:g} per step, "
                  f"{first['poisson_rate']:g} units per step waited; shaded = ± 1 standard error", fontsize=11)
     fig.text(0.995, 0.005, "code version: " + describe(first["git"]), ha="right", va="bottom", fontsize=7, color="gray")
     fig.tight_layout()
@@ -186,10 +202,11 @@ def run(args, parser):
         provider_mix, taker_mix = parse_mix(args.provider_mix), parse_mix(args.taker_mix)
     except ValueError as error:
         parser.error(str(error))
-    if not (0 <= args.value_traders <= N_AGENTS) or not (0 <= args.momentum_traders <= N_AGENTS - args.value_traders):
-        parser.error(f"--value-traders and --momentum-traders must be 0 or more and add up to at most {N_AGENTS}")
-    n_takers = N_AGENTS - args.value_traders - args.momentum_traders
-    for name, mix, total in (("--provider-mix", provider_mix, N_AGENTS), ("--taker-mix", taker_mix, n_takers)):
+    n_agents = args.n_agents
+    if not (0 <= args.value_traders <= n_agents) or not (0 <= args.momentum_traders <= n_agents - args.value_traders):
+        parser.error(f"--value-traders and --momentum-traders must be 0 or more and add up to at most {n_agents}")
+    n_takers = n_agents - args.value_traders - args.momentum_traders
+    for name, mix, total in (("--provider-mix", provider_mix, n_agents), ("--taker-mix", taker_mix, n_takers)):
         if mix is not None and sum(mix.values()) != total:
             parser.error(f"{name}: the counts must add up to {total}, got {sum(mix.values())}")
     if not (0 < args.poisson_chance <= 1) or args.poisson_rate <= 0:
@@ -201,18 +218,18 @@ def run(args, parser):
     value = (args.value_traders, args.true_value_step, args.value_spread)
     momentum = (args.momentum_traders, tuple(args.momentum_orders), args.momentum_window, args.momentum_scale)
     poisson = (args.poisson_chance, args.poisson_rate)
-    tasks = [(seed, args.n_steps, args.warmup, args.after, provider_mix, taker_mix, value, momentum, poisson)
+    tasks = [(n_agents, seed, args.n_steps, args.warmup, args.after, provider_mix, taker_mix, value, momentum, poisson)
              for seed in range(args.n_runs)]
     config = dict(n_runs=args.n_runs, n_steps=args.n_steps, warmup=args.warmup, after=args.after,
-                  n_agents=N_AGENTS, params=PARAMS, git=git_info(),
-                  providers=describe_mix(provider_mix), takers=describe_mix(taker_mix, n_takers),
+                  n_agents=n_agents, params=PARAMS, git=git_info(),
+                  providers=describe_mix(provider_mix, n_agents), takers=describe_mix(taker_mix, n_takers),
                   provider_mix=provider_mix, taker_mix=taker_mix,
                   n_value_traders=args.value_traders, true_value_step=args.true_value_step,
                   value_spread=args.value_spread,
                   poisson_chance=args.poisson_chance, poisson_rate=args.poisson_rate,
                   n_momentum_traders=args.momentum_traders, momentum_orders=list(args.momentum_orders),
                   momentum_window=args.momentum_window, momentum_scale=args.momentum_scale)
-    print(f"{args.n_runs} runs of {args.n_steps:,} steps, code version {describe(config['git'])}\n"
+    print(f"N_A = {n_agents}: {args.n_runs} runs of {args.n_steps:,} steps, code version {describe(config['git'])}\n"
           f"providers: {config['providers']}\ntakers:    {config['takers']}"
           + (f"\nplus:      {args.value_traders} value traders (true value step {args.true_value_step:g}, "
              f"spread {args.value_spread:g})" if args.value_traders else "")
@@ -241,10 +258,11 @@ def run(args, parser):
 
     windows, sizes, unfilled = np.asarray(windows), np.asarray(sizes), np.asarray(unfilled)
     bands = {}
-    for low, high in zip(BANDS[:-1], BANDS[1:]):
-        inside = (sizes >= low) & (sizes < high)
+    edges = bands_for(n_agents)
+    named = [(band_name(low, high), (sizes >= low) & (sizes < high)) for low, high in zip(edges[:-1], edges[1:])]
+    for name, inside in named + [("all", np.ones(len(sizes), dtype=bool))]:
         if inside.any():
-            bands[band_name(low, high)] = {
+            bands[name] = {
                 "mean": mean_response(windows[inside]),
                 "error": np.nanstd(windows[inside], axis=0) / np.sqrt(inside.sum()),
                 "n": int(inside.sum()), "mean_size": float(sizes[inside].mean()),
@@ -275,8 +293,9 @@ def main(argv=None):
                          help="chance of an order each step (default 0.0002, once per 5,000 steps)")
     run_cmd.add_argument("--poisson-rate", type=float, default=0.06,
                          help="units per step since the last order (default 0.06: mean order 300 units)")
+    run_cmd.add_argument("--n-agents", type=int, default=N_AGENTS, help=f"N_A (default {N_AGENTS})")
     run_cmd.add_argument("--value-traders", type=int, default=0,
-                         help="how many of the 250 takers are value traders (default 0)")
+                         help="how many of the takers are value traders (default 0)")
     run_cmd.add_argument("--true-value-step", type=float, default=1.0,
                          help="small step of the true value each step, standard deviation in ticks (default 1)")
     run_cmd.add_argument("--value-spread", type=float, default=50.0,

@@ -155,8 +155,9 @@ def plot(labels, datas, out):
     ax_zoom.set(title="(b) the first 300 steps", xlim=(-30, 300))
     ax_all.legend(fontsize=8)
     first = datas[0]["config"]
-    fig.suptitle(f"News event study: N$_A$={N_AGENTS}, jumps of {first['news_jump']:g} ± {first['news_jump_spread']:g} "
-                 f"ticks, shaded = ± 1 standard error", fontsize=11)
+    jumps = list(dict.fromkeys(f"{d['config']['news_jump']:g} ± {d['config']['news_jump_spread']:g}" for d in datas))
+    fig.suptitle(f"News event study: N$_A$={N_AGENTS}, jumps of {', '.join(jumps)} ticks, "
+                 f"shaded = ± 1 standard error", fontsize=11)
     fig.text(0.995, 0.005, "code version: " + describe(first["git"]), ha="right", va="bottom", fontsize=7, color="gray")
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)

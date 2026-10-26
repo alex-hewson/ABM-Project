@@ -42,10 +42,23 @@ markets", EPL 75, 510.
   for value traders, and a plot that compares results files (`plot.py compare`)
 - First look at what value traders do in normal times: at the default settings they hold the price
   too close to its average and remove the trend of Figs. 3–4 (`validation.md`, section 11)
+- Value traders estimate a true value that ignores the price, which removed a drift (D30); final
+  value trader sweep: recovery speed depends on their share divided by their error (`validation.md`,
+  section 14)
+- Momentum traders that follow the trend from 1–3 derivatives of recent prices (D31). They deepen a
+  crash, then speed the rebound (`validation.md`, section 15). A sweep over their share, mix of
+  orders and window is on the cluster
+- News: jumps in the true value at random times (D32), and an event study that averages the price
+  around every jump (D33). The price takes in all of the news; order-1 momentum traders speed this
+  up and make it overshoot (`validation.md`, section 16)
+- The Poisson trader: large market orders at random times, sized by the wait since the last (D34),
+  and its event study (D35). It reproduces the single shock tests from orders at random times, and
+  gives impact against order size (`validation.md`, section 17)
 
 Code layout and how to run things: see `README.md`.
 
-**Git:** `main` holds all of Phase 1. The finished baseline is tagged `baseline-v1` (D23).
+**Git:** `main` holds all of Phase 1. The finished baseline is tagged `baseline-v1` (D23). Phase 2 is
+on a chain of branches (shock-test → … → poisson-trader), not yet merged into `main`.
 
 ## Open questions
 Each is described in `decisions.md`:
@@ -112,18 +125,19 @@ The plan for the rest of Phase 2 is in `phase2_plan.md`.
 
 ## Immediate next steps
 
-1. Find value trader settings (number, size of errors, amount of news) that give recovery after a shock
-   without pinning the price in normal times. The sweep is ready to run on the cluster
-   (`experiments/value_sweep.py`, `cluster/value_sweep.slurm`).
-2. Momentum traders are built (D31), and a first shock test with value traders is done
-   (`validation.md`, section 15). A sweep over momentum share, mix of orders and window is ready to
-   run on the cluster (`experiments/momentum_sweep.py`, `cluster/momentum_sweep.slurm`). Next:
-   news (jumps in the true value) and a "Poisson trader" (large orders at random times, larger the
-   longer since the last), then the scaling of correlation functions and a phase diagram of momentum
-   against value traders (supervisors' requests, 20 October 2026).
-3. Fat tails: providers that place their orders further from the midpoint when recent volatility is
+1. Collect and read the momentum trader sweep when the cluster jobs finish
+   (`python -m experiments.momentum_sweep collect`).
+2. Check whether the response to news is proportional to the jump: jumps of 10, 30 and 100 ticks,
+   inside and beyond the value traders' spread (D32, D33).
+3. The scaling of correlation functions and phase changes (the physics supervisor's request, 20
+   October 2026): a phase diagram over the shares of value and momentum traders. Value traders pull
+   the price back, momentum traders push it on, so the market should change from recovering to
+   running away. The recovery time after a shock is a relaxation time, which may grow near the
+   boundary. To be designed before building; the momentum sweep should set its ranges.
+4. Merge the Phase 2 branches into `main`.
+5. Fat tails: providers that place their orders further from the midpoint when recent volatility is
    high. This keeps the idea of Eq. 4 (entry depth widens in turbulent times), but providers react
    to something they can see, the recent price changes, instead of the takers' hidden buy
    probability. The basic model has no fat tails without it (`decisions.md`, section 5).
-4. When the E-mini data arrives: find out its form and the rules for using it, keep it out of the
+6. When the E-mini data arrives: find out its form and the rules for using it, keep it out of the
    repository, then measure order rates and the response to large orders in it.

@@ -75,7 +75,9 @@ def test_poisson_event_study_end_to_end():
         check(f"{data['n_used']} of {data['n_orders']} orders used", 0 < data["n_used"] <= data["n_orders"])
         check("one size and one impact per order used",
               len(data["sizes"]) == len(data["impacts"]) == data["n_used"] and np.isfinite(data["impacts"]).all())
-        check("the bands hold every order once", sum(b["n"] for b in data["bands"].values()) == data["n_used"])
+        check("the size bands hold every order once, and 'all' holds them together",
+              sum(b["n"] for name, b in data["bands"].items() if name != "all") == data["n_used"]
+              == data["bands"]["all"]["n"])
         check("every order, shown as a sell, makes the price fall on average",
               all(b["mean"][200] < b["mean"][150] for b in data["bands"].values()))
         figure = Path(tmp) / "compare.png"

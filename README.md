@@ -236,6 +236,23 @@ python -m experiments.pressure run --value-traders 50 --out results/pressure/val
 python -m experiments.pressure plot --data results/pressure/plain.pkl results/pressure/value50.pkl --labels "paper's agents" "value 50" --out results/pressure/compare.png
 ```
 
+`--n-agents` sets N_A (250 by default); the size bands and the impact fit range scale with it.
+
+### Phase diagram sweep
+
+Value traders against momentum traders, at N_A = 125, 250, 500 and 1000 (`docs/decisions.md`, D36):
+176 combinations, each a normal-times run and two Poisson trader event studies. It is meant for the
+cluster:
+
+```
+python -m experiments.phase_sweep list
+sbatch cluster/phase_sweep.slurm
+python -m experiments.phase_sweep collect
+```
+
+`collect` writes `summary.csv`, the mean autocorrelation functions (`autocorrelations.pkl`) and one
+heatmap per measure, with one panel per N_A, to `results/phase_sweep/`.
+
 ### Value trader sweep
 
 Tries 48 combinations of value trader settings (share of takers, amount of news, mean error), plus a control

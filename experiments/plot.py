@@ -300,10 +300,10 @@ def plot_returns_semilog(ax, runs, bin_edges_by_price, price, title, compare=Non
     ax.legend(fontsize=6, ncol=2 if compare is not None else 1)
 
 
-def approximate_kurtosis(runs, bin_edges, price, tau):
-    """Kurtosis of the signed increments (3 for a Gaussian), from the binned |Delta p| counts. Only
-    approximate, since every increment is placed at its bin centre."""
-    counts = sum(r["return_counts"][price][tau] for r in runs if r["n_agents"] == DEPTH_AGENTS).astype(float)
+def approximate_kurtosis(runs, bin_edges, price, tau, n_agents=DEPTH_AGENTS):
+    """Kurtosis of the signed increments (3 for a Gaussian), from the binned |Delta p| counts, for the
+    runs at n_agents (500 by default). Only approximate, since every increment is placed at its bin centre."""
+    counts = sum(r["return_counts"][price][tau] for r in runs if r["n_agents"] == n_agents).astype(float)
     centres = np.sqrt(bin_edges[:-1] * bin_edges[1:])
     p = counts / counts.sum()
     return (p * centres ** 4).sum() / (p * centres ** 2).sum() ** 2

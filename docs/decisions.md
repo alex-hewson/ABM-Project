@@ -293,9 +293,10 @@ up and the price around it averaged (`experiments/news.py`, `analysis/events.py`
   of the true value move it by about 45 ticks over 2,000 steps, more than a jump, which drowns it.
 - Numbers read off: the share taken in during step 0, steps until half and 90% is taken in, the
   largest share (above 1 = overshoot) and when, and the share at the end of the window.
-- This assumes the response is proportional to the jump. Whether big jumps are taken in the same way
-  as small ones has not been checked, in particular jumps larger than the value traders' spread
-  (D32).
+- This assumes the response is proportional to the jump. Checked (`validation.md`, section 16):
+  jumps of 10 and 30 ticks give the same curve, but jumps of 100 ticks, twice the value traders'
+  mean error (D32), are taken in about half as fast. So results in units of the jump hold for news
+  inside the spread only.
 
 **D34. The Poisson trader: large orders at random times, bigger the longer since the last. [Assumed]**
 Asked for by the supervisors (20 October 2026), as the "pressure" kind of news: a large order with no
@@ -351,6 +352,34 @@ these differences:
   waited. The size distribution is the same as with the defaults (mean 300 units); the orders only
   come twice as often. Only orders alone in their window are used, which drops the few orders that
   come within 200 steps of the last (all of them tiny, since size grows with the wait).
+
+**D36. Phase diagram of value against momentum traders, with system size. [Assumed]**
+For the physics supervisor's request (20 October 2026): the scaling of correlation functions and
+phase changes. `experiments/phase_sweep.py`.
+- **Idea.** Value traders pull the price back to the true value; momentum traders push it further the
+  way it is going. As the momentum share rises against the value share, the market should change
+  from recovering after a shock to running away. The time to recover is a relaxation time, which in
+  physics grows near a phase transition, and the transition gets sharper as the system gets bigger.
+- **Settings (the axes).** Value traders 0, 5, 10, 20, 40 and 60% of the takers; momentum traders 0,
+  10, 20, 30, 40, 50, 60 and 80%; together at most 100% (44 points). Momentum traders are all
+  order 1, window 50, since order 1 drives trends and a mix adds little (`validation.md`, section
+  16). Value traders as before (mean error 50 ticks, true value step 1).
+- **System size.** N_A = 125, 250, 500 and 1000 (176 combinations), to see whether the change gets
+  sharper with size (finite-size scaling).
+- **Measured at each point.** In normal times (16 runs of 10^6 steps): the order parameter, the
+  correlation of consecutive 50-step price changes (negative = reverts, positive = trends); H(Δτ);
+  the autocorrelation functions of price changes and of their size, kept whole for the scaling
+  analysis. With the Poisson trader (D34, D35): the half-life and lowest point after an order, and
+  impact against size.
+- **Poisson order size scales with N_A.** The book holds about 2.4 units per agent on each side, so
+  a fixed order would be a crash at N_A = 125 and a ripple at 1000, and the sizes would differ in
+  what they measure, not only in system size. The mean order is set per agent, at two levels:
+  0.6 units per agent, a quarter of one side, where only about 2% of orders empty a side (the
+  orders measure impact and recovery); and 1.2, half of one side (300 units at N_A = 250, as in
+  section 17), where about 1 in 8 orders empties a side. Comparing the two shows how much the
+  results depend on the book running out. In the E-mini a single order emptying one side of the book
+  essentially never happens; the size of large orders relative to the depth is to be taken from the
+  data when it arrives. The event study's size bands and impact fit range also scale with N_A.
 
 ---
 

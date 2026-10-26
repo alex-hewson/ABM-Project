@@ -546,6 +546,23 @@ its own random numbers, so all three markets have the same jumps at the same tim
 (76 and 250). Only a third of the mixed traders follow the slope; the order-2 and order-3 traders
 add little push of their own, and the overshoot of the order-1-only market is gone.
 
+**Jump size** (50 value traders, no momentum traders; jumps of 10 ± 3.3 ticks over 192 runs, 30 ± 10
+and 100 ± 33 over 64 runs; `results/news/jump_sizes.png`). Share of the jump taken in:
+
+| Jumps | Jumps used | Half-way | 90% |
+|---|---|---|---|
+| 10 ticks | 1,167 | 132 steps | 330 steps |
+| 30 ticks | 405 | 114 steps | 441 steps |
+| 100 ticks | 405 | 233 steps | 620 steps |
+
+- Jumps of 10 and 30 ticks give the same curve within the noise (the 90% times differ because the
+  curves are flat there, so where they cross 0.9 is noisy). Inside the value traders' spread
+  (mean error 50 ticks), the response is proportional to the news, as D33 assumes.
+- Jumps of 100 ticks are taken in about half as fast. At twice the mean error, nearly every value
+  trader is on the same side at once, so there are no more traders to add: the buying pressure
+  stops growing with the jump and the price climbs at a limited speed. Results in units of the jump
+  hold for news inside the spread, not beyond it.
+
 ## 17. Poisson trader event study (first look)
 
 The Poisson trader (D34) inside long runs, averaged around every order in bands of size (D35). 250
