@@ -325,6 +325,33 @@ new information behind it. It turns the single shock of D24 into many shocks ins
 
 With no Poisson trader (chance 0) the model is exactly as before.
 
+**D35. How the response to the Poisson trader is measured. [Assumed]**
+The same event study as for news (D33, `analysis/events.py`), in `experiments/pressure.py`, with
+these differences:
+- Step 0 is the step at the end of which the order was placed, so its price already shows the full
+  impact, as in the shock test (D24).
+- Every order is flipped to look like a sell, so a fall is negative, as in the shock test.
+- The windows are averaged in ticks within bands of order size (under 150, 150–400, over 400
+  units), not divided by the size: impact is not proportional to size, because a bigger order eats
+  deeper into the book. The shock test's numbers (impact, lowest point, half-life, share recovered,
+  D25) are read off each band's average.
+- The price is measured relative to the true value when there are value traders (D25), and is the
+  plain mid-price change otherwise.
+- Each order's own impact is also kept, to give impact against size: the price change from the step
+  before to step 0. (The first version measured it from the mean of the 200 steps before, as the
+  curves are. With momentum traders the price trends, so that mean can be far from the price just
+  before the order, and small orders' impacts were lost in it.) A power is fitted through the mean
+  impact in log-spaced size bins between 30 and 500 units: below 30 the impact is lost in the
+  noise, and above 500 orders start to empty a side of the book at N_A = 250, which caps their
+  impact. Real markets show impact growing roughly like the square root of order size, which
+  makes this a check to repeat on the E-mini data.
+- An order that empties the other side leaves no mid-price at step 0; the next step's is used for
+  it, once the providers have refilled that side.
+- To get more orders per run, the event study uses a chance of 1 in 5,000 and 0.06 units per step
+  waited. The size distribution is the same as with the defaults (mean 300 units); the orders only
+  come twice as often. Only orders alone in their window are used, which drops the few orders that
+  come within 200 steps of the last (all of them tiny, since size grows with the wait).
+
 ---
 
 ## 5. Still open

@@ -223,6 +223,19 @@ python -m experiments.news run --value-traders 50 --momentum-traders 50 --out re
 python -m experiments.news plot --data results/news/value50.pkl results/news/value50_mom50.pkl --labels "value" "value + momentum" --out results/news/compare.png
 ```
 
+### Poisson trader event study
+
+`--poisson-chance P` (runner) adds the Poisson trader: with chance P each step it places one market
+order, `--poisson-rate` units per step since its last order (0.03 by default, so 300 units on average
+at P = 0.0001), buy or sell at random (`docs/decisions.md`, D34). The event study lines up every
+order in long runs, like the news study, and averages the price in bands of order size. It also
+plots each order's impact against its size (D35):
+
+```
+python -m experiments.pressure run --value-traders 50 --out results/pressure/value50.pkl
+python -m experiments.pressure plot --data results/pressure/plain.pkl results/pressure/value50.pkl --labels "paper's agents" "value 50" --out results/pressure/compare.png
+```
+
 ### Value trader sweep
 
 Tries 48 combinations of value trader settings (share of takers, amount of news, mean error), plus a control

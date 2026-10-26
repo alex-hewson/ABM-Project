@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from analysis.events import clean_events, signed_window
-from experiments import news
+from experiments import news, pressure
 
 
 def check(label, condition):
@@ -62,6 +62,26 @@ def test_news_event_study_end_to_end():
         with contextlib.redirect_stdout(io.StringIO()):
             news.main(["plot", "--data", str(out), str(out), "--labels", "a", "b", "--out", str(figure)])
         check("plot draws saved files together", figure.exists())
+
+
+def test_poisson_event_study_end_to_end():
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "pressure.pkl"
+        with contextlib.redirect_stdout(io.StringIO()):
+            pressure.main(["run", "--n-runs", "2", "--n-steps", "15000", "--poisson-chance", "0.0005",
+                           "--poisson-rate", "0.15", "--after", "1000", "--workers", "2", "--out", str(out)])
+        with open(out, "rb") as f:
+            data = pickle.load(f)
+        check(f"{data['n_used']} of {data['n_orders']} orders used", 0 < data["n_used"] <= data["n_orders"])
+        check("one size and one impact per order used",
+              len(data["sizes"]) == len(data["impacts"]) == data["n_used"] and np.isfinite(data["impacts"]).all())
+        check("the bands hold every order once", sum(b["n"] for b in data["bands"].values()) == data["n_used"])
+        check("every order, shown as a sell, makes the price fall on average",
+              all(b["mean"][200] < b["mean"][150] for b in data["bands"].values()))
+        figure = Path(tmp) / "compare.png"
+        with contextlib.redirect_stdout(io.StringIO()):
+            pressure.main(["plot", "--data", str(out), str(out), "--labels", "a", "b", "--out", str(figure)])
+        check("plot draws saved files, one row each", figure.exists())
 
 
 if __name__ == "__main__":

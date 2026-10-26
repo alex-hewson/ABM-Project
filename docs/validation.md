@@ -545,3 +545,41 @@ its own random numbers, so all three markets have the same jumps at the same tim
 0.95. This is close to value traders alone (114 and 441 steps), and slower than 50 order-1 traders
 (76 and 250). Only a third of the mixed traders follow the slope; the order-2 and order-3 traders
 add little push of their own, and the overshoot of the order-1-only market is gone.
+
+## 17. Poisson trader event study (first look)
+
+The Poisson trader (D34) inside long runs, averaged around every order in bands of size (D35). 250
+agents; chance 1 in 5,000 per step and 0.06 units per step waited (mean order 300 units); 64 runs of
+50,000 steps per market; 364 of 651 orders used. The Poisson trader has its own random numbers, so
+all three markets have the same orders at the same times (`results/pressure/compare.png`). In ticks,
+every order shown as a sell:
+
+| Market | Band (mean size) | Impact | Lowest | Half-life | Recovered |
+|---|---|---|---|---|---|
+| paper's agents | 0–150 (73) | −9.6 | −10.3 | never | 0.04 |
+| | 150–400 (249) | −31.5 | −33.5 | never | 0.03 |
+| | 400+ (695) | −95.5 | −95.5 | never | 0.23 |
+| value 50 | 0–150 (73) | −10.1 | −10.1 | 93 | 0.80 |
+| | 150–400 (249) | −31.6 | −31.6 | 88 | 1.01 |
+| | 400+ (695) | −111.0 | −113.3 | 248 | 1.01 |
+| value 50 + momentum 100 (order 1) | 0–150 (73) | −7.7 | −22.4 | 246 | 0.97 |
+| | 150–400 (249) | −35.5 | −61.5 | 216 | 1.06 |
+| | 400+ (695) | −101.3 | −135.6 | 291 | 1.08 |
+
+- **The event study agrees with the single shock tests.** In the 150–400 band: without value traders
+  the price never comes back (section 8); with 50 value traders the half-life is 88 steps (shock
+  test: 92); with momentum traders as well the price falls further, to −62 about 70 steps later,
+  then recovers with a half-life of 216 steps (shock test: −65 and 218). So the event study
+  measures the same thing as the shock test, from orders at random times.
+- **Momentum traders deepen the fall for every size,** by about 15–35 ticks, and slow the recovery.
+  Even orders under 150 units (impact −8) are followed by a fall to −22.
+- **Large orders often empty a side.** A side holds about 600 units at N_A = 250. Of the 80 orders
+  over 400 units, 38–45 emptied it. Their impact is then capped by the size of the book.
+- **Impact against size** (the price change in the step of the order, fitted between 30 and 500
+  units): impact grows like size^0.82 (paper's agents), size^0.94 (value 50) and size^0.85 (with
+  momentum). The three agree, as they should: the impact in the step of the order depends only on
+  the book. The curve is not a straight line on log scales: it is flatter below about 50 units and
+  steeper above about 100, so the book gets thinner further from the midpoint. Real markets show
+  impact growing like the square root of size, but that law is for large orders split up and traded
+  over time, not single market orders. Whether the model's single-order impact matches real data is
+  a question for the E-mini data.
