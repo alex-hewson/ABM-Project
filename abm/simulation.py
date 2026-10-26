@@ -42,6 +42,7 @@ from abm.buy_probability import SideProbability
 
 
 SHOCK_AGENT_ID = -1    # agent_id on the shock's orders, so its trades can be told apart
+POISSON_AGENT_ID = -2  # agent_id on the Poisson trader's orders
 
 
 @dataclass
@@ -110,6 +111,12 @@ class SimulationResult:
     # true value jumped, and each jump in ticks (+ up, - down).
     news_steps: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=int))
     news_jumps: np.ndarray = field(default_factory=lambda: np.empty(0))
+    # Poisson trader (filled only if run_simulation had poisson_chance above 0): the steps at the end of
+    # which it placed an order, each order's size in units (+ buy, - sell), and how many units of each
+    # found nothing left to trade against.
+    poisson_steps: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=int))
+    poisson_sizes: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=int))
+    poisson_unfilled: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=int))
     # Momentum traders (filled only if run_simulation had n_momentum_traders above 0): for each order of
     # trader present, the price move it predicted in each step (0 until the window has filled).
     trend_series: Dict[int, np.ndarray] = field(default_factory=dict)
@@ -206,6 +213,8 @@ def run_simulation(
     news_chance: float = 0.0,
     news_jump: float = 30.0,
     news_jump_spread: float = 10.0,
+    poisson_chance: float = 0.0,
+    poisson_rate: float = 0.03,
     n_momentum_traders: int = 0,
     momentum_orders: Sequence[int] = (2,),
     momentum_window: int = 50,
@@ -285,6 +294,13 @@ def run_simulation(
     News has its own random numbers, so a run with news is the same as without it up to the first
     jump. The steps and the jumps are returned in result.news_steps and result.news_jumps.
 
+    poisson_chance adds the Poisson trader (docs/decisions.md, D34): an outside trader that, with this
+    chance each step, places one market order at the end of the step, like a shock. 0 (the default)
+    leaves the run exactly as it was. Its size is poisson_rate units per step since its last order
+    (since step 0 for the first), rounded, at least 1, and it buys or sells with equal chance. It has
+    its own random numbers, so a run is the same as without it up to its first order. The orders are
+    returned in result.poisson_steps, result.poisson_sizes (+ buy, - sell) and result.poisson_unfilled.
+
     n_momentum_traders turns that many of the remaining takers into momentum traders (see
     MomentumTrader in agents.py); 0 (the default) leaves the run exactly as it was. They act at the same
     rate mu. They read the trend from the mid-prices at the end of the last momentum_window steps, and
@@ -321,6 +337,10 @@ def run_simulation(
         raise ValueError("news_chance needs value traders: news moves the true value, which only they see")
     if news_jump < 0 or news_jump_spread < 0:
         raise ValueError("news_jump and news_jump_spread must be 0 or more")
+    if not (0 <= poisson_chance <= 1):
+        raise ValueError("poisson_chance must be between 0 and 1")
+    if poisson_rate <= 0:
+        raise ValueError("poisson_rate must be above 0")
     if n_momentum_traders < 0 or n_value_traders + n_momentum_traders > n_agents:
         raise ValueError(f"value and momentum traders together must be between 0 and n_agents = {n_agents}")
     if n_momentum_traders and (not momentum_orders or any(o not in (1, 2, 3) for o in momentum_orders)):
@@ -337,6 +357,7 @@ def run_simulation(
     rng = random.Random(seed)
     # News draws from its own stream, so the main one is the same with or without news.
     news_rng = random.Random(None if seed is None else f"news-{seed}")
+    poisson_rng = random.Random(None if seed is None else f"poisson-{seed}")    # the same for the Poisson trader
     step_trade_prices: List[int] = []     # prices of the trades in the current step
     book = OrderBook(keep_trades=keep_trades,
                      on_trade=step_trade_prices.append if record_trade_prices else None)
@@ -481,6 +502,10 @@ def run_simulation(
     true_value_series = np.empty(n_steps) if value_traders else np.empty(0)
     news_steps: List[int] = []
     news_jumps: List[float] = []
+    poisson_steps: List[int] = []
+    poisson_sizes: List[int] = []
+    poisson_unfilled: List[int] = []
+    poisson_last = 0                           # step of the Poisson trader's last order (start: step 0)
     trend_series = {order: np.zeros(n_steps) for order in orders}
     # The true value starts where the pre-opening left the market (the start price if the book still
     # has no midpoint). It does not depend on the price after that.
@@ -529,6 +554,16 @@ def run_simulation(
             traded_before = book.volume_traded
             book.submit_market_order(shock.side, t, agent_id=SHOCK_AGENT_ID, quantity=shock.size)
             shock_unfilled = shock.size - (book.volume_traded - traded_before)   # above 0 if that side ran out
+        if poisson_chance > 0 and poisson_rng.random() < poisson_chance:
+            # Poisson trader (D34): one market order, larger the longer since its last.
+            size = max(1, round(poisson_rate * (step - poisson_last)))
+            side = Side.BID if poisson_rng.random() < 0.5 else Side.ASK
+            traded_before = book.volume_traded
+            book.submit_market_order(side, t, agent_id=POISSON_AGENT_ID, quantity=size)
+            poisson_steps.append(step)
+            poisson_sizes.append(size if side is Side.BID else -size)
+            poisson_unfilled.append(size - (book.volume_traded - traded_before))
+            poisson_last = step
 
         mid_now = book.mid_price()
         mid_price_series.append(mid_now)
@@ -577,6 +612,9 @@ def run_simulation(
         true_value_series=true_value_series,
         news_steps=np.array(news_steps, dtype=int),
         news_jumps=np.array(news_jumps, dtype=float),
+        poisson_steps=np.array(poisson_steps, dtype=int),
+        poisson_sizes=np.array(poisson_sizes, dtype=int),
+        poisson_unfilled=np.array(poisson_unfilled, dtype=int),
         value_shifts=np.array([v.shift for v in value_traders]),
         trend_series=trend_series,
     )

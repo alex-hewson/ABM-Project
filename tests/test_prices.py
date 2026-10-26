@@ -6,7 +6,7 @@ Run with: python -m tests.test_prices   (from the project root)
 import numpy as np
 
 from abm.simulation import run_simulation
-from analysis.prices import PRICE_DEFINITIONS, forward_fill, price_series
+from analysis.prices import PRICE_DEFINITIONS, forward_fill, mid_gaps, price_series
 
 PRE = 10   # pre-opening steps used by run_simulation's default
 
@@ -85,8 +85,13 @@ def test_error_cases():
     check("trade definitions need record_trade_prices=True", raises_value_error(price_series, r, "last"))
     check("unknown definition rejected", raises_value_error(price_series, r, "vwap"))
     r.mid_price_series[3] = None
-    check("mid with a one-sided-book gap is rejected, not silently filled",
-          raises_value_error(price_series, r, "mid"))
+    r.mid_price_series[4] = None
+    s = price_series(r, "mid")
+    check("a step with one side of the book empty keeps the last mid-price (D34)",
+          s[3] == s[4] == r.mid_price_series[2] and np.isfinite(s).all())
+    check("and such steps are counted", mid_gaps(r) == 2)
+    r.mid_price_series[:] = [None] * len(r.mid_price_series)
+    check("a book that never had both sides is rejected", raises_value_error(price_series, r, "mid"))
 
 
 if __name__ == "__main__":

@@ -297,6 +297,34 @@ up and the price around it averaged (`experiments/news.py`, `analysis/events.py`
   as small ones has not been checked, in particular jumps larger than the value traders' spread
   (D32).
 
+**D34. The Poisson trader: large orders at random times, bigger the longer since the last. [Assumed]**
+Asked for by the supervisors (20 October 2026), as the "pressure" kind of news: a large order with no
+new information behind it. It turns the single shock of D24 into many shocks inside one long run.
+- Each step there is a fixed chance of an order, 1 in 10,000 by default, whatever happened before
+  (the same timing as news, D32).
+- Its size grows in a straight line with the steps since its last order (since the start of the run
+  for the first): 0.03 units per step by default, rounded, at least 1. Read as pressure building up
+  at a steady rate, e.g. a fund collecting client orders, then released at once. With the default
+  chance the mean wait is 10,000 steps, so the mean order is 300 units, the largest shock tested
+  (D24). Because the waits are random, so are the sizes: most orders are moderate, and a long quiet
+  spell ends in a very large one.
+- Buy or sell with equal chance, drawn fresh each time.
+- One market order, all at once, at the end of the step, like the shock. If it empties that side of
+  the book, the rest is dropped and recorded. Real large traders usually split their orders over
+  time; that may be added later.
+- **An emptied side.** The sizes are spread out, so a few orders are very large (in a 200,000-step
+  trial the largest of 25 were 728 and 1,085 units). At N_A = 125 (about 300 units per side) 7 of
+  those 25 emptied one side of the book; at 250, 2; at 500, none. For that step there is no
+  mid-price. The price measures then carry the last mid-price forward, as an exchange shows the last
+  price when one side is empty. The providers refill the side within a step. The number of such
+  steps is recorded for each run (`mid_gaps`) so it stays visible. Not chosen: capping each order at
+  a share of the other side (it would cut down the largest orders, which are the point), and scaling
+  the size with N_A (possible later, so the order is the same size relative to the book).
+- It is an outside trader, not one of the N_A agents. It has its own random numbers, so a run is the
+  same as without it up to its first order. The steps, signed sizes and unfilled parts are recorded.
+
+With no Poisson trader (chance 0) the model is exactly as before.
+
 ---
 
 ## 5. Still open

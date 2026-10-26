@@ -539,3 +539,9 @@ its own random numbers, so all three markets have the same jumps at the same tim
   a large order it is away from the value, so they deepen the fall.
 - The "largest" value in the summary table is read off a noisy curve. Without momentum traders its
   maximum (1.05 at step 1,034) is noise, not an overshoot.
+
+**Mixed momentum traders** (same jumps; 100 momentum traders split equally between orders 1, 2 and
+3; `results/news/compare_mixed.png`): half-way after 79 steps, 90% after 320, no overshoot, end
+0.95. This is close to value traders alone (114 and 441 steps), and slower than 50 order-1 traders
+(76 and 250). Only a third of the mixed traders follow the slope; the order-2 and order-3 traders
+add little push of their own, and the overshoot of the order-1-only market is gone.

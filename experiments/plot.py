@@ -372,6 +372,9 @@ def describe_settings(config: dict) -> str:
     news = config.get("news")
     if news is not None:
         text += f", news (chance {news['chance']:g}, jumps of {news['jump']:g})"
+    big = config.get("poisson_trader")
+    if big is not None:
+        text += f", Poisson trader (chance {big['chance']:g}, mean order {big['rate'] / big['chance']:.0f})"
     return text
 
 

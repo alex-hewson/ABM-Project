@@ -12,7 +12,9 @@ keeps every candidate and the choice is made explicitly later. See docs/decision
     mean    mean trade price in the step
 
 Steps with no trade carry the previous trade price forward; any steps before the very first
-trade take that first trade's price.
+trade take that first trade's price. Likewise, a step in which one side of the book is empty (no
+mid-price, e.g. after a very large order, docs/decisions.md, D34) carries the previous mid-price
+forward; mid_gaps() counts such steps so they stay visible.
 """
 
 from __future__ import annotations
@@ -38,13 +40,18 @@ def forward_fill(values: np.ndarray) -> np.ndarray:
     return filled
 
 
+def mid_gaps(result: SimulationResult) -> int:
+    """Steps that ended with one side of the book empty, so with no mid-price."""
+    return sum(p is None for p in result.mid_price_series)
+
+
 def price_series(result: SimulationResult, kind: str) -> np.ndarray:
     """One price per step, as a float array, under the named definition."""
     if kind == "mid":
-        if any(p is None for p in result.mid_price_series):
-            raise ValueError("the book went one-sided (mid-price undefined) at some step; "
-                             "a gap-free series is needed")
-        return np.array(result.mid_price_series, dtype=float)
+        mids = np.array([np.nan if p is None else p for p in result.mid_price_series], dtype=float)
+        if np.isnan(mids).all():
+            raise ValueError("the book never had both sides, so there is no mid-price at all")
+        return forward_fill(mids)       # a step with one side empty keeps the last mid-price
     if kind not in PRICE_DEFINITIONS:
         raise ValueError(f"unknown price definition {kind!r}; choose from {PRICE_DEFINITIONS}")
     if kind not in result.trade_price_steps:

@@ -240,6 +240,20 @@ def test_run_one_with_news():
           and make_config(1000, {}, news=(0.0001, 30.0, 10.0))["news"] == {"chance": 0.0001, "jump": 30.0, "spread": 10.0})
 
 
+def test_run_one_with_the_poisson_trader():
+    plain = run_one((125, 0, 3_000, "symmetric", 0.0))
+    nothing = ((0.0, 1.0, 50.0), ((), ()), (0.0, (1,), 50, 1.0), (0.0, 30.0, 10.0))
+    spelled_out = run_one((125, 0, 3_000, "symmetric", 0.0, *nothing, (0.0, 0.03)))
+    big = run_one((125, 0, 3_000, "symmetric", 0.0, *nothing, (0.003, 0.1)))      # orders of about 33 units
+    check("no Poisson trader written out is the plain run", same_run(plain, spelled_out))
+    check("without it no orders are stored", len(plain["poisson_steps"]) == 0)
+    check("with it the orders are stored, one size per step",
+          len(big["poisson_steps"]) > 0 and len(big["poisson_steps"]) == len(big["poisson_sizes"]))
+    check("its settings are recorded in the config, None when not used",
+          make_config(1000, {})["poisson_trader"] is None
+          and make_config(1000, {}, poisson=(0.0001, 0.03))["poisson_trader"] == {"chance": 0.0001, "rate": 0.03})
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

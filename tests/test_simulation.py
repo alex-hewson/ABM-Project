@@ -676,6 +676,48 @@ def test_price_follows_the_news():
     check(f"over {len(moves)} jumps, the price moves on average {share:.2f} of the jump, between 0.6 and 1.4", 0.6 < share < 1.4)
 
 
+def test_poisson_trader_settings_are_validated():
+    kwargs = dict(n_steps=10, **VALUE_KWARGS)
+    check("a chance above 1 rejected", raises_value_error(lambda: run_simulation(poisson_chance=1.5, **kwargs)))
+    check("a rate of 0 rejected", raises_value_error(lambda: run_simulation(poisson_chance=0.01, poisson_rate=0, **kwargs)))
+
+
+def test_without_the_poisson_trader_the_run_is_unchanged():
+    kwargs = dict(n_steps=2000, seed=3, **VALUE_KWARGS)
+    plain = run_simulation(**kwargs)
+    spelled_out = run_simulation(poisson_chance=0.0, poisson_rate=5.0, **kwargs)
+    check("chance 0: the same run, whatever the rate", run_fingerprint(plain) == run_fingerprint(spelled_out))
+    check("and no orders recorded", len(plain.poisson_steps) == 0 and len(plain.poisson_sizes) == 0)
+
+
+def test_poisson_orders_come_at_random_times_and_grow_with_the_wait():
+    """D34: a fixed chance each step; each order is rate x steps since the last one, buy or sell at random."""
+    r = run_simulation(n_steps=40_000, seed=2, poisson_chance=0.005, poisson_rate=0.4, keep_trades=False,
+                       **VALUE_KWARGS)
+    steps, sizes = r.poisson_steps, r.poisson_sizes
+    n = len(steps)
+    check(f"{n} orders in 40,000 steps at a chance of 0.005, within 15% of 200", abs(n - 200) < 30)
+    waits = np.diff(steps, prepend=0)
+    check("each order's size is 0.4 x the steps since the last order (since step 0 for the first), at least 1",
+          np.array_equal(np.abs(sizes), np.maximum(1, np.round(0.4 * waits)).astype(int)))
+    check(f"mean size {np.abs(sizes).mean():.0f}, within 15% of 0.4 / 0.005 = 80", abs(np.abs(sizes).mean() - 80) < 12)
+    up = int(np.sum(sizes > 0))
+    check(f"buys and sells about equally often: {up} of {n} buys", abs(up - n / 2) < 3 * np.sqrt(n) / 2)
+    check("orders of this size are filled in full", np.all(r.poisson_unfilled == 0))
+
+
+def test_a_poisson_order_moves_the_price_like_a_shock():
+    """Up to its first order the run is the same as without it, and that order moves the price its way."""
+    kwargs = dict(n_steps=6000, seed=4, **VALUE_KWARGS)
+    plain = run_simulation(**kwargs)
+    big = run_simulation(poisson_chance=0.001, poisson_rate=0.3, **kwargs)
+    first, size = int(big.poisson_steps[0]), int(big.poisson_sizes[0])
+    check(f"the first order ({size:+d} units) comes at step {first}", 0 < first < 5900 and abs(size) > 20)
+    check("prices identical before that step", plain.mid_price_series[:first] == big.mid_price_series[:first])
+    move = big.mid_price_series[first] - plain.mid_price_series[first]
+    check(f"the order moves the price {move:+.1f} ticks, the same way as the order", move * size > 0)
+
+
 def test_fast_and_per_agent_methods_agree_with_momentum_traders():
     stats = {}
     for method in ("fast", "agents"):
