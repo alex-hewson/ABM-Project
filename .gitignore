@@ -3,3 +3,5 @@ results/
 notes/
 logs/
 slurm-*.out
+# Market data (e.g. E-mini) must never be committed; keep it outside the project if possible
+data/

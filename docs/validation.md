@@ -600,3 +600,67 @@ every order shown as a sell:
   impact growing like the square root of size, but that law is for large orders split up and traded
   over time, not single market orders. Whether the model's single-order impact matches real data is
   a question for the E-mini data.
+
+## 18. Momentum trader sweep (cluster)
+
+All 242 combinations (D31; `experiments/momentum_sweep.py`; results in `results/momentum_sweep/`,
+table `summary.csv`, heatmaps `summary_*.png`). Shock tests: 250 agents, 200 runs per size; normal
+times: N_A = 500, 16 runs of 10^6 steps. With value traders: 20% of takers (50 in the shock test).
+
+**Shock with value traders** (300-unit sell; control: lowest −37.7, half-life 92 steps):
+- 10% momentum: the fall is no deeper (−37 to −39 in every mix and window), but recovery is slower:
+  half-life 100–270 steps.
+- 25% and 50%: deeper and slower. Order 1 is the strongest (50%, window 50: −70, half-life 219);
+  order 3 the weakest (−53, 170). Longer windows slow recovery much more: order 1 at 50% with a
+  window of 500 falls to −91 and has a half-life of 1,852 steps, close to not recovering.
+
+**Normal times:**
+- Order 1 makes the price trend: at 25% the correlation of consecutive 50-step changes turns
+  positive (+0.19 at window 50, without value traders), and at 50% the typical move over 200 steps
+  is 5 times the control (92 against 19 ticks). With 20% value traders the same happens at 50%
+  momentum (+0.48, 63 ticks).
+- Orders 2 and 3 do something different: at short windows they make the price oscillate. At 50% with
+  window 50 the correlation of consecutive 50-step changes is −0.80 (order 2) and the local Hurst
+  exponent at a lag of 100 steps is 1.6 (order 2) and 2.2–2.4 (order 3, window 100). H above 1 is
+  not a Hurst exponent in the usual sense: the RMS change rises faster than the lag, as it does over
+  the first half of a regular wave. The waves seem to have a period of about twice the window. At
+  long windows (200–500) orders 2 and 3 trend like order 1. The earlier view that orders 2 and 3 add
+  little (section 16) holds for news, not for normal times.
+- No fat tails anywhere: the kurtosis of 200-step changes is 1.1–3.6. Strong momentum lowers it well
+  below 3 (1.1 for order 1 at 50%): large, regular swings, close to the value for a sine wave (1.5).
+- **To check:** order 1 at 50%, windows 200 and 500, without value traders: H(100) is 0.98 but the
+  correlation of consecutive 50-step changes is −0.25 and −0.37, and the fall after a shock (−45 and
+  −76) is smaller than at window 100 (−129). These do not fit together; individual price paths
+  should be looked at.
+
+## 19. Phase diagram sweep (cluster)
+
+All 176 combinations (D36; `experiments/phase_sweep.py`; results in `results/phase_sweep/`, table
+`summary.csv`, heatmaps `phase_*.png`, autocorrelation functions `autocorrelations.pkl`). Order-1
+momentum traders, window 50; value traders with mean error 50 ticks.
+
+- **The Poisson order scaling works:** with orders of a quarter of one side, the impact is the same
+  at every N_A (about −20 ticks at 20% value traders), 0–2% of orders empty a side, and 10–13% with
+  orders of half of one side, as expected (D36). No normal-times run had a step with a side empty.
+- **Order parameter** (correlation of consecutive 50-step price changes): about −0.37 with no
+  momentum traders, rising steadily with the momentum share and changing sign along a line in the
+  plane. With no value traders it crosses zero near 20% momentum; with 20% value traders near 30%;
+  with 60% value traders near 45%. Value traders push the boundary to higher momentum shares.
+- **It gets sharper with system size.** With no value traders, from 10% to 30% momentum the order
+  parameter rises by 0.37 at N_A = 125 and by 0.66 at N_A = 1000, and the zero crossing moves to
+  lower momentum shares as N_A grows. This is what a phase transition looks like in finite systems;
+  whether the curves at different N_A collapse onto one (finite-size scaling) is the next analysis.
+- **The time to recover does not blow up at that line.** With value traders present, the half-life
+  rises smoothly with the momentum share and falls with the value share (20% value: about 60 steps
+  with no momentum, about 310 with 80%, at every N_A). It hardly depends on N_A. Even deep on the
+  trending side (20% value, 80% momentum, correlation +0.79) the price still recovers. So "trending"
+  and "not recovering" are different: recovery only fails without value traders. The expected
+  critical slowing down at the boundary is not seen in the half-life.
+- **Artefact:** without value traders and with 60–80% momentum, the half-life comes out as about 25
+  steps. There the price trends so strongly that the order's impact is small against the trend,
+  whose direction is unrelated to the order, so the averaged curve returns to zero for that reason,
+  not because the price recovers. The same applies to 5% value traders at N_A = 1000 with 50–80%
+  momentum. Half-lives without value traders should not be read as recovery.
+- Also to check: at N_A = 1000, no value traders, the order parameter is +0.92 at 60% momentum but
+  +0.80 at 80%.
+- No fat tails anywhere (kurtosis 1.0–3.3).

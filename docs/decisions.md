@@ -293,6 +293,13 @@ up and the price around it averaged (`experiments/news.py`, `analysis/events.py`
   of the true value move it by about 45 ticks over 2,000 steps, more than a jump, which drowns it.
 - Numbers read off: the share taken in during step 0, steps until half and 90% is taken in, the
   largest share (above 1 = overshoot) and when, and the share at the end of the window.
+- **Error bands** are ±1 standard error of the mean: the spread across jumps at each step, divided
+  by the square root of the number of jumps (and by the mean jump). This treats every jump as
+  independent. Jumps from different runs are; jumps from the same run are at least 2,200 steps
+  apart but share one market, so if the market remembers that long the bands are too narrow. Not
+  yet checked; the check is to save one average curve per run and compare the error from the spread
+  between runs. Also, runs with the same seed have news at the same times, so studies that differ
+  only in jump size (`validation.md`, section 16) share their jump times and signs.
 - This assumes the response is proportional to the jump. Checked (`validation.md`, section 16):
   jumps of 10 and 30 ticks give the same curve, but jumps of 100 ticks, twice the value traders'
   mean error (D32), are taken in about half as fast. So results in units of the jump hold for news
@@ -402,5 +409,8 @@ phase changes. `experiments/phase_sweep.py`.
 - **Where the order book hands over to news.** Up to some time scale the price's randomness is the
   order book's own; beyond it, it follows the true value. Where that happens, and whether it matches
   real data, has not been measured.
+- **Order sizes for value and momentum traders.** Agent types (D27) have only been given to the
+  paper's providers and takers. Value and momentum traders always place 1-unit orders every step,
+  so how order size affects the price's recovery after a shock has not been tested.
 - **Which mixes of agent types to compare,** and whether speed and size should also be varied
   separately (e.g. unit orders every 4 steps).
