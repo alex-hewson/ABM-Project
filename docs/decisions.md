@@ -388,6 +388,32 @@ phase changes. `experiments/phase_sweep.py`.
   essentially never happens; the size of large orders relative to the depth is to be taken from the
   data when it arrives. The event study's size bands and impact fit range also scale with N_A.
 
+**D37. Comparing the model with the E-mini data. [Assumed]**
+Asked for by the supervisors: comparable statistics for the model and the real market.
+- **Data.** E-mini S&P 500 futures, Refinitiv Time and Sales (trades, and quotes of the best bid
+  and ask with their sizes), 5–7 May 2010, continuous front-month contract (`ESc1`). It includes
+  the flash crash of 6 May 2010. The data is kept outside the repository; scripts take its path and
+  save only statistics (`experiments/emini.py`).
+- **Same code for both.** Every statistic is computed by `analysis/stylised.py` from per-trade
+  series, for the data and the model alike, so differences come from the markets, not the code.
+- **Time is counted in trades,** in both. A model step has no natural length in seconds, and trade
+  time also removes the daily pattern of busy and quiet hours from the data. Clock time with a
+  fitted "one step = X seconds" was the alternative.
+- **Prices in ticks** (0.25 index points for the E-mini). Order sizes are compared relative to the
+  units at the best price, since a model unit is not a contract.
+- **Which data.** Regular trading hours only, 13:30–20:15 UTC (08:30–15:15 Chicago); the overnight
+  session is much thinner. The statistics use 5 and 7 May; 6 May is kept apart for the crash. Each
+  day is one segment: no change is taken across the overnight gap.
+- **Per trade:** the trade price, and the mid-price, spread and units at the best bid and ask of the
+  last quote before it. In the model, whose state is only recorded at the end of each step, they are
+  taken from the end of the step before the trade's step.
+- **Statistics:** RMS change and H against lag; kurtosis and tails of the changes; autocorrelation
+  of trade-to-trade changes (bid-ask bounce) and of the size of 100-trade changes (volatility
+  clustering); spread; units at the best price; trade size relative to them.
+- **Model markets:** the paper's agents (Fig. 2), Fig. 4, and 20% value traders with 10% and with
+  30% momentum traders, one on each side of the boundary of D36. N_A = 500, 4 runs of 10^5 steps
+  each (about 5 million trades per market).
+
 ---
 
 ## 5. Still open

@@ -48,6 +48,26 @@ def test_inspect_summarises_without_rows():
     check("no row of the data is printed", not any(row in text for row in ROWS) and "6500.25,3" not in text)
 
 
+def test_trades_get_the_last_quote_before_them_and_the_session_is_kept():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "sample.csv"
+        path.write_text("\n".join([HEADER, *ROWS]) + "\n")
+        with contextlib.redirect_stdout(io.StringIO()):
+            segments = emini.trade_segments(path, days=("2026-09-01",), session=("13:00", "15:00"))
+            only_first = emini.trade_segments(path, days=("2026-09-01",), session=("13:00", "13:45"))
+            out = Path(tmp) / "stats.pkl"
+            facts = emini.stats(path, out, days=("2026-09-01",), session=("13:00", "15:00"))
+        saved = out.exists()
+    s = segments[0]
+    check("the three trades of that day, in ticks", list(s["trade"]) == [6500.25 / 0.25, 6500.5 / 0.25, 6500.25 / 0.25])
+    check("each trade has the last quote before it",
+          s["mid"][0] == (6500 + 6500.25) / 2 / 0.25 and s["mid"][2] == (6500.25 + 6500.75) / 2 / 0.25
+          and list(s["spread"]) == [1, 1, 2] and list(s["bid_size"]) == [40, 40, 10])
+    check("trades outside the hours chosen are left out", len(only_first[0]["trade"]) == 2)
+    check("the Correction row and the other day are not used", len(segments) == 1)
+    check("statistics saved, without the series", saved and facts["n_trades"] == 3 and "trade" not in facts["source"])
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

@@ -253,6 +253,19 @@ python -m experiments.phase_sweep collect
 `collect` writes `summary.csv`, the mean autocorrelation functions (`autocorrelations.pkl`) and one
 heatmap per measure, with one panel per N_A, to `results/phase_sweep/`.
 
+### Comparison with E-mini data
+
+The E-mini data is kept outside the repository; every command takes its path and saves only
+statistics (`docs/decisions.md`, D37). The same statistics, in trade time, come from
+`analysis/stylised.py` for the data and for the model:
+
+```
+python -m experiments.emini inspect PATH_TO_CSV        # what is in the file, without showing rows
+python -m experiments.emini stats PATH_TO_CSV          # statistics of 5 and 7 May 2010, regular hours
+python -m experiments.emini_compare model              # the same statistics for four model markets
+python -m experiments.emini_compare compare            # table and figure: results/emini/compare.png
+```
+
 ### Value trader sweep
 
 Tries 48 combinations of value trader settings (share of takers, amount of news, mean error), plus a control

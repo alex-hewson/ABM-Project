@@ -102,6 +102,12 @@ class SimulationResult:
     n_asks_series: np.ndarray = field(default_factory=lambda: np.empty(0))     # resting sell orders
     bid_volume_series: np.ndarray = field(default_factory=lambda: np.empty(0))  # resting units, buy side
     ask_volume_series: np.ndarray = field(default_factory=lambda: np.empty(0))  # resting units, sell side
+    best_bid_size_series: np.ndarray = field(default_factory=lambda: np.empty(0))   # resting units at the best bid
+    best_ask_size_series: np.ndarray = field(default_factory=lambda: np.empty(0))   # resting units at the best ask
+    # Every trade in order (filled only if run_simulation(record_trades=True)): the step it happened in
+    # and its price. A trade is one fill between two orders, as in the order book.
+    trade_steps: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=int))
+    trade_prices: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=int))
     # How many units of the shock found nothing left to trade against (0 if there was no shock).
     shock_unfilled: int = 0
     # Value traders (filled only if run_simulation had n_value_traders above 0): the asset's true value
@@ -205,6 +211,7 @@ def run_simulation(
     q_rms: Optional[float] = None,
     shock: Optional[Shock] = None,
     record_sides: bool = False,
+    record_trades: bool = False,
     provider_mix: Optional[Mapping[AgentType, int]] = None,
     taker_mix: Optional[Mapping[AgentType, int]] = None,
     n_value_traders: int = 0,
@@ -263,10 +270,13 @@ def run_simulation(
     shock injects one large market order (see Shock) at the end of the given step. None (the default)
     leaves the run exactly as it was without this option.
 
-    record_sides=True stores the best bid, the best ask, and the number of resting orders and of
-    resting units on each side at the end of every step (result.best_bid_series etc.). Orders and
-    units are the same number while every order is one unit. It uses no random numbers, so it does
-    not change the run.
+    record_sides=True stores the best bid, the best ask, the resting units at each of them, and the
+    number of resting orders and of resting units on each side at the end of every step
+    (result.best_bid_series etc.). Orders and units are the same number while every order is one unit.
+    It uses no random numbers, so it does not change the run.
+
+    record_trades=True stores the step and price of every trade after the pre-opening, in order
+    (result.trade_steps, result.trade_prices), for statistics in trade time. It does not change the run.
 
     provider_mix and taker_mix give agents different speeds and order sizes (see AgentType). Each is
     {agent type: number of agents} and must add up to n_agents, e.g.
@@ -359,8 +369,19 @@ def run_simulation(
     news_rng = random.Random(None if seed is None else f"news-{seed}")
     poisson_rng = random.Random(None if seed is None else f"poisson-{seed}")    # the same for the Poisson trader
     step_trade_prices: List[int] = []     # prices of the trades in the current step
+    all_trade_steps: List[int] = []       # with record_trades: the step and price of every trade
+    all_trade_prices: List[int] = []
+    now = [-1]                            # the step being run; -1 in the pre-opening, whose trades are not kept
+
+    def on_trade(price: int) -> None:
+        if record_trade_prices:
+            step_trade_prices.append(price)
+        if record_trades and now[0] >= 0:
+            all_trade_steps.append(now[0])
+            all_trade_prices.append(price)
+
     book = OrderBook(keep_trades=keep_trades,
-                     on_trade=step_trade_prices.append if record_trade_prices else None)
+                     on_trade=on_trade if (record_trade_prices or record_trades) else None)
 
     # Agents are created type by type. Within a type, agent i gets offset i % interval, which spreads
     # that type evenly over the steps. With the default mix this is the paper's population.
@@ -498,6 +519,7 @@ def run_simulation(
     best_bid_series, best_ask_series = np.full(n_side, np.nan), np.full(n_side, np.nan)
     n_bids_series, n_asks_series = np.zeros(n_side, dtype=int), np.zeros(n_side, dtype=int)
     bid_volume_series, ask_volume_series = np.zeros(n_side, dtype=int), np.zeros(n_side, dtype=int)
+    best_bid_size_series, best_ask_size_series = np.zeros(n_side, dtype=int), np.zeros(n_side, dtype=int)
     shock_unfilled = 0
     true_value_series = np.empty(n_steps) if value_traders else np.empty(0)
     news_steps: List[int] = []
@@ -514,6 +536,7 @@ def run_simulation(
 
     for t in range(pre_opening_steps, pre_opening_steps + n_steps):
         step = t - pre_opening_steps
+        now[0] = step
         q_now = taker_flow.q if taker_flow is not None else None     # this step's q, used all step
         lambda_now = None
         if depth_coupling > 0:                  # Eq. 4
@@ -574,8 +597,10 @@ def run_simulation(
             best_bid, best_ask = book.best_bid(), book.best_ask()
             if best_bid is not None:
                 best_bid_series[step] = best_bid
+                best_bid_size_series[step] = book.depth_at(Side.BID, best_bid)
             if best_ask is not None:
                 best_ask_series[step] = best_ask
+                best_ask_size_series[step] = book.depth_at(Side.ASK, best_ask)
             n_bids_series[step] = book.orders_on(Side.BID)
             n_asks_series[step] = book.orders_on(Side.ASK)
             bid_volume_series[step] = book.volume_on(Side.BID)
@@ -608,6 +633,10 @@ def run_simulation(
         n_asks_series=n_asks_series,
         bid_volume_series=bid_volume_series,
         ask_volume_series=ask_volume_series,
+        best_bid_size_series=best_bid_size_series,
+        best_ask_size_series=best_ask_size_series,
+        trade_steps=np.array(all_trade_steps, dtype=int),
+        trade_prices=np.array(all_trade_prices, dtype=int),
         shock_unfilled=shock_unfilled,
         true_value_series=true_value_series,
         news_steps=np.array(news_steps, dtype=int),

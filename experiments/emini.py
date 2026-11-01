@@ -13,6 +13,13 @@ Expected columns:
     Bid Price, Bid Size, Ask Price, Ask Size        filled on Quote rows: the best price on each side
 
     python -m experiments.emini inspect PATH_TO_CSV
+    python -m experiments.emini stats PATH_TO_CSV
+
+`stats` computes the statistics of analysis/stylised.py in trade time, the same ones as for the model
+(experiments/emini_compare.py), from regular trading hours (13:30-20:15 UTC) on the days given
+(default 5 and 7 May 2010, leaving out the flash crash of 6 May). Each day is one segment. For every
+trade the mid-price, spread and sizes at the best prices are those of the last quote before it.
+Prices are converted to ticks of 0.25. Only the statistics are saved (results/emini/emini_stats.pkl).
 
 `inspect` reads the whole file in chunks and prints, without showing any row: the contracts and row
 types present, the date range and timestamp format, how often each field is empty, the tick size,
@@ -24,6 +31,7 @@ output is meant to settle how the data is to be compared with the model (docs/pr
 from __future__ import annotations
 
 import argparse
+import pickle
 import re
 import time
 from collections import Counter
@@ -32,6 +40,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from analysis.stylised import stylised_facts, summary_rows
+
+TICK = 0.25                                  # E-mini S&P 500 tick size, in index points (found by inspect)
+DAYS = ("2010-05-05", "2010-05-07")
+SESSION = ("13:30", "20:15")                 # regular trading hours in UTC (08:30-15:15 Chicago, in May)
+STATS_OUT = Path("results/emini/emini_stats.pkl")
 COLUMNS = ["#RIC", "Domain", "Date-Time", "Type", "Price", "Volume", "Bid Price", "Bid Size", "Ask Price", "Ask Size"]
 NUMERIC = ["Price", "Volume", "Bid Price", "Bid Size", "Ask Price", "Ask Size"]
 CHUNK = 1_000_000
@@ -207,16 +221,98 @@ def inspect(path: Path, max_rows: int | None = None) -> Summary:
     return summary
 
 
+QUOTE_FIELDS = ["Bid Price", "Bid Size", "Ask Price", "Ask Size"]
+
+
+def trade_segments(path: Path, days=DAYS, session=SESSION, max_rows: int | None = None) -> list:
+    """One segment per day (analysis/stylised.py): every trade in the session, with the last quote
+    before it. Reads the file in chunks; the last quote is carried over from one chunk to the next."""
+    parts = {day: [] for day in days}
+    last_quote = pd.DataFrame([[np.nan] * 4], columns=QUOTE_FIELDS)
+    reader = pd.read_csv(path, usecols=lambda c: c in COLUMNS, chunksize=CHUNK, nrows=max_rows,
+                         dtype={"#RIC": "string", "Domain": "string", "Date-Time": "string", "Type": "string"})
+    for chunk in reader:
+        for column in NUMERIC:
+            chunk[column] = pd.to_numeric(chunk[column], errors="coerce")
+        is_quote = chunk["Type"] == "Quote"
+        quotes = chunk[QUOTE_FIELDS].where(is_quote)
+        # The quote in force at every row: the last quote row at or before it (carried over from the
+        # previous chunk for the first rows). A trade row's own quote fields are empty, so it gets the
+        # quote before it.
+        filled = pd.concat([last_quote, quotes]).ffill().iloc[1:]
+        filled.index = chunk.index
+        if is_quote.any():
+            last_quote = filled[is_quote].iloc[[-1]].reset_index(drop=True)
+        trades = (chunk["Type"] == "Trade") & chunk["Price"].notna()
+        if not trades.any():
+            continue
+        times = pd.to_datetime(chunk.loc[trades, "Date-Time"], format="ISO8601", utc=True)
+        day = times.dt.strftime("%Y-%m-%d")
+        clock = times.dt.strftime("%H:%M")
+        keep = day.isin(days) & (clock >= session[0]) & (clock < session[1])
+        if not keep.any():
+            continue
+        rows = chunk.loc[trades][keep.to_numpy()]
+        q = filled.loc[rows.index]
+        frame = pd.DataFrame({
+            "day": day[keep].to_numpy(),
+            "trade": rows["Price"].to_numpy() / TICK,
+            "mid": (q["Bid Price"] + q["Ask Price"]).to_numpy() / 2 / TICK,
+            "spread": (q["Ask Price"] - q["Bid Price"]).to_numpy() / TICK,
+            "bid_size": q["Bid Size"].to_numpy(), "ask_size": q["Ask Size"].to_numpy(),
+            "size": rows["Volume"].to_numpy()})
+        for d, group in frame.groupby("day"):
+            parts[d].append(group)
+    segments = []
+    for d in days:
+        if not parts[d]:
+            print(f"no trades found on {d} between {session[0]} and {session[1]} UTC")
+            continue
+        frame = pd.concat(parts[d])
+        segment = {name: frame[name].to_numpy(dtype=float) for name in ("trade", "mid", "spread", "bid_size", "ask_size", "size")}
+        segment["mid"] = pd.Series(segment["mid"]).ffill().bfill().to_numpy()    # before the session's first quote
+        segments.append(segment)
+        print(f"{d}: {len(frame):,} trades")
+    return segments
+
+
+def stats(path: Path, out: Path, days=DAYS, session=SESSION, max_rows: int | None = None) -> dict:
+    start = time.perf_counter()
+    segments = trade_segments(path, days, session, max_rows)
+    if not segments:
+        raise SystemExit("No trades in the chosen days and hours.")
+    facts = stylised_facts(segments)
+    facts["source"] = {"days": list(days), "session_utc": list(session), "tick": TICK,
+                       "trades_per_day": [len(s["trade"]) for s in segments]}
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "wb") as f:
+        pickle.dump(facts, f)
+    print(f"\nE-mini, {', '.join(days)}, {session[0]}-{session[1]} UTC ({time.perf_counter() - start:.0f}s):")
+    for label, value in summary_rows(facts):
+        print(f"  {label:45} {value}")
+    print(f"saved {out} (statistics only, no rows of the data)")
+    return facts
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
     inspect_cmd = commands.add_parser("inspect", help="summarise the file without showing any rows")
-    inspect_cmd.add_argument("path", type=Path, help="the CSV file (kept outside the repository)")
-    inspect_cmd.add_argument("--max-rows", type=int, default=None, help="read only this many rows (for a quick look)")
+    stats_cmd = commands.add_parser("stats", help="statistics in trade time, to compare with the model")
+    for sub in (inspect_cmd, stats_cmd):
+        sub.add_argument("path", type=Path, help="the CSV file (kept outside the repository)")
+        sub.add_argument("--max-rows", type=int, default=None, help="read only this many rows (for a quick look)")
+    stats_cmd.add_argument("--days", nargs="+", default=list(DAYS), help="days to use, YYYY-MM-DD (default 5 and 7 May 2010)")
+    stats_cmd.add_argument("--session", nargs=2, default=list(SESSION), metavar=("FROM", "TO"),
+                           help="hours to use, HH:MM in UTC (default 13:30 20:15)")
+    stats_cmd.add_argument("--out", type=Path, default=STATS_OUT)
     args = parser.parse_args(argv)
     if not args.path.exists():
         raise SystemExit(f"No such file: {args.path}")
-    inspect(args.path, args.max_rows)
+    if args.command == "inspect":
+        inspect(args.path, args.max_rows)
+    else:
+        stats(args.path, args.out, tuple(args.days), tuple(args.session), args.max_rows)
 
 
 if __name__ == "__main__":
