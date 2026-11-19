@@ -56,6 +56,10 @@ model that matches the stylised facts, with no crash needed.
     once the trial results are in: the providers' memory W is 50–200 steps, roughly 600–2,500 trades
     at N_A = 500, so their effect on H may only show at lags longer than 1,000 trades (e.g. a test over
     1,000–10,000 trades). The check is redone from the saved statistics, so this needs no new runs.
+    **Revisited after the trial (D39, trial results):** H at 1,000 trades is about 0.15 in every
+    combination and in both controls, and every one of them reaches 0.5 somewhere between 2,000 and
+    6,000 trades. A test over 1,000–10,000 trades would therefore let everything pass, controls
+    included, and would not separate one setup from another. Whether to change (b): **[Open]**.
   - (c) the lag-1 autocorrelation of trade-to-trade changes below 0, and the autocorrelation of
     100-trade changes within ±0.1 at lags 1–5.
 
@@ -173,3 +177,67 @@ model that matches the stylised facts, with no crash needed.
   jobs. Each is N_A = 500, 4 runs of 120,000 steps; the first 20,000 steps of each run are left out of
   the statistics while the long-run averages settle. Each combination is checked against D38
   automatically.
+- **Trial results (19 November 2026).** All 218 jobs finished (`results/volatility_sweep/summary.csv`
+  and `summary.png`). There are about 12.5 trades per step in every run, so 1,000 trades is about 80
+  steps. No mid-price gaps occurred.
+  - **No combination passes all three tests.** 38 of 216 pass (a), none pass (b) and none pass (c).
+  - **(b) and (c) do not depend on the providers.** The values are almost the same in every
+    combination and in both controls:
+
+    | | Model (all 218 runs) | E-mini |
+    |---|---|---|
+    | H at 1,000 trades | 0.10–0.21, nearly all 0.15 | 0.51 |
+    | H first reaches 0.5 at | about 3,400 trades (Fig. 4), about 5,600 (fixed depth) | about 100 trades |
+    | lag-1 autocorrelation of trade-to-trade changes (bounce) | −0.49 | −0.32 |
+    | autocorrelation of 100-trade changes, lag 1 | −0.45 to −0.50 | about 0 |
+
+    Part of this comes from the spread. At about 24 ticks it is wide compared with how far the price
+    moves over 100 trades, so trade prices jump back and forth across it. The mid-price also
+    reverts, though: in both controls its H falls to about 0.24 at 75–270 trades and only reaches
+    0.5 at about 1,000–2,000 trades, and its 100-trade changes have an autocorrelation of −0.32 at lag 1.
+    The model's prices therefore move back towards earlier levels over roughly 10–200 steps, with or
+    without volatility providers. This matches the Preis model's own H below 0.5 at short times.
+
+    The volatility provider changes only the mean distance λ at which providers place their orders,
+    and how it varies over time. Everything else is the same in every run of the trial:
+    - the takers: market orders, with the buy probability q(t) following the mean-reverting walk;
+    - the providers' chance to act, their side choice and the exponential draw of the distance;
+    - cancellation: each order in the book removed with probability δ = 0.025 per step;
+    - α, μ, N_A and λ₀ = 100.
+
+    Since (b) and (c) come out the same whatever λ does, including in the fixed-depth control, they
+    are set by these fixed parts. Which parts is not yet tested. Likely explanations:
+    - **The spread comes from λ₀.** Orders are placed about 100 ticks from the price on average, which
+      leaves a gap of about 24 ticks between the best bid and the best ask.
+    - **The mid-price reverting comes from cancellation (untested).** Orders left in the book hold a
+      memory of where the price has been. With δ = 0.025 an order lasts about 1/δ = 40 steps on
+      average, about 500 trades. The reversion is strongest at about 6–22 steps (75–270 trades) and has
+      faded by about 80–160 steps (1,000–2,000 trades), a few order lifetimes.
+    - **H above 0.5 at about 10,000 trades comes from the takers (untested).** q(t) stays away from 1/2
+      for about 250 steps at a time, so the order flow leans one way and the price drifts over that
+      time. That gives H of 0.6–0.66 at long lags.
+
+    Varying δ or λ₀ with fixed-depth providers would test the first two.
+  - **(a) passes only weakly.** The kurtosis curves that pass are flat after the first lag, e.g.
+    4.9, 3.9, 3.8 and 3.8 at 1, 10, 100 and 1,000 trades (`std_k5_W50_fading_L1000_linear`),
+    against the E-mini's 12.6, 5.9, 3.2 and 2.9. No combination shows tails that fade with lag the
+    way the E-mini's do. The passes are 27 linear with L = 1,000, 4 linear with L = 5,000, and 7 widen
+    (W = 50 or 100 with L = 5,000 or 20,000).
+  - **Widen form: a small effect at C = 1.** Mean depth is 104–112 ticks and the largest depth 207
+    ticks (median; 350 at most). The statistics stay close to the fixed-depth control (median
+    kurtosis 3.4, 2.7, 2.6, 2.7).
+  - **Linear form with long memory (L = 5,000 or 20,000): unstable.** In 35 of these 72 combinations
+    the depth reaches the 1-tick floor. With W = 50 the median spread falls to about 7 ticks, the
+    mean depth to about 26 ticks and the kurtosis at 1 trade rises to about 55. At worst the spread
+    is 1.2 ticks and the kurtosis 569 (`abs_k20_W50_fixed_L20000_linear`). A likely cause is a
+    narrowing loop: in a quiet spell the depth drops below λ₀, so orders sit closer to the price and
+    price changes get smaller, so recent volatility falls further below the slowly moving long-run
+    average, and the depth drops again. With W = 200 the effect is small (spread about 24, kurtosis
+    at 1 trade about 8). The linear form with L = 1,000 stays stable (spread 23.5–24.4 ticks).
+  - **Settings that hardly matter:** the measure (std or abs), k (5, 10, 20) and fixed against fading
+    memory change the results very little. Only W and L matter: a shorter W and a longer L give
+    larger and more variable depths and higher kurtosis.
+  - **Conclusion from the trial:** most of the gap to the E-mini in trade time comes from the parts
+    the trial held fixed (the takers, λ₀ and cancellation), which give the wide spread and the
+    reverting price. It does not come from how the providers react to volatility. Whether
+    to keep the volatility provider, change it or throw it out (D38): **[Open]**.
