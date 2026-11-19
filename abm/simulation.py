@@ -39,6 +39,7 @@ from abm.orderbook import OrderBook, Side, OrderResult
 from abm.agents import (LiquidityProvider, LiquidityTaker, ValueTrader, AgentType, draw_value_shift,
                         MomentumTrader, TrendReader, TypicalSize, momentum_buy_probability)
 from abm.buy_probability import SideProbability
+from abm.volatility_provider import VolatilityGauge, VolatilityProvider, VolatilitySettings
 
 
 SHOCK_AGENT_ID = -1    # agent_id on the shock's orders, so its trades can be told apart
@@ -91,7 +92,7 @@ class SimulationResult:
     # run_simulation was given a taker_flow (asymmetric order flow); empty otherwise.
     q_taker_series: np.ndarray = field(default_factory=lambda: np.empty(0))
     # The providers' mean entry depth lambda(t) used in each step. Filled only if run_simulation was
-    # given a depth_coupling above 0 (Eq. 4, paper Fig. 4); empty otherwise.
+    # given a depth_coupling above 0 (Eq. 4, paper Fig. 4) or volatility providers; empty otherwise.
     lambda_series: np.ndarray = field(default_factory=lambda: np.empty(0))
 
     # The state of each side of the book at the end of every step. Filled only if
@@ -209,6 +210,7 @@ def run_simulation(
     taker_flow: Optional[SideProbability] = None,
     depth_coupling: float = 0.0,
     q_rms: Optional[float] = None,
+    volatility: Optional[VolatilitySettings] = None,
     shock: Optional[Shock] = None,
     record_sides: bool = False,
     record_trades: bool = False,
@@ -266,6 +268,12 @@ def run_simulation(
     is the takers' buy probability in that step and q_rms is sqrt(<(q - 1/2)^2>). 0 (the default) keeps
     the depth fixed at lambda_. It needs a taker_flow and q_rms. Providers and takers in a step use the
     same q(t). The values used are returned in result.lambda_series.
+
+    volatility (see abm/volatility_provider.py; docs/volatility_provider/decisions.md, D39) makes every
+    provider a VolatilityProvider: their mean entry depth follows the recent volatility of the mid-price,
+    compared with its long-run average, instead of Eq. 4. The depth is worked out once per step from the
+    mid-prices up to the end of the step before, and returned in result.lambda_series. None (the default)
+    leaves the run exactly as it was. It cannot be combined with depth_coupling.
 
     shock injects one large market order (see Shock) at the end of the given step. None (the default)
     leaves the run exactly as it was without this option.
@@ -333,6 +341,8 @@ def run_simulation(
         raise ValueError("depth_coupling needs a taker_flow: lambda(t) depends on the takers' q(t)")
     if depth_coupling > 0 and not (q_rms and q_rms > 0):
         raise ValueError("depth_coupling needs q_rms > 0, the value of sqrt(<(q - 1/2)^2>) in Eq. 4")
+    if volatility is not None and depth_coupling > 0:
+        raise ValueError("volatility providers replace Eq. 4: use either volatility or depth_coupling, not both")
     if shock is not None and not (0 <= shock.step < n_steps):
         raise ValueError(f"shock.step must be a recorded step, 0 to {n_steps - 1}")
     if shock is not None and shock.size < 1:
@@ -386,11 +396,13 @@ def run_simulation(
     # Agents are created type by type. Within a type, agent i gets offset i % interval, which spreads
     # that type evenly over the steps. With the default mix this is the paper's population.
     provider_ids, taker_ids = itertools.count(0), itertools.count(n_agents)     # agent ids, as before
+    provider_class = VolatilityProvider if volatility is not None else LiquidityProvider
     providers = [
-        LiquidityProvider(agent_id=next(provider_ids), alpha=alpha, q_provider=q_provider, lambda_=lambda_,
-                          interval=agent_type.interval, size=agent_type.size, offset=i % agent_type.interval)
+        provider_class(agent_id=next(provider_ids), alpha=alpha, q_provider=q_provider, lambda_=lambda_,
+                       interval=agent_type.interval, size=agent_type.size, offset=i % agent_type.interval)
         for agent_type, count in provider_mix.items() for i in range(count)
     ]
+    gauge = VolatilityGauge(volatility, lambda_) if volatility is not None else None
     takers = [
         LiquidityTaker(agent_id=next(taker_ids), mu=mu, q_taker=q_taker,
                        interval=agent_type.interval, size=agent_type.size, offset=i % agent_type.interval)
@@ -514,7 +526,7 @@ def run_simulation(
     depth_sum: Dict[int, int] = {}
     n_depth_snapshots = 0
     q_taker_series = np.empty(n_steps) if taker_flow is not None else np.empty(0)
-    lambda_series = np.empty(n_steps) if depth_coupling > 0 else np.empty(0)
+    lambda_series = np.empty(n_steps) if (depth_coupling > 0 or gauge is not None) else np.empty(0)
     n_side = n_steps if record_sides else 0
     best_bid_series, best_ask_series = np.full(n_side, np.nan), np.full(n_side, np.nan)
     n_bids_series, n_asks_series = np.zeros(n_side, dtype=int), np.zeros(n_side, dtype=int)
@@ -541,6 +553,9 @@ def run_simulation(
         lambda_now = None
         if depth_coupling > 0:                  # Eq. 4
             lambda_now = lambda_ * (1 + abs(q_now - 0.5) / q_rms * depth_coupling)
+            lambda_series[step] = lambda_now
+        elif gauge is not None:                 # volatility providers (D39)
+            lambda_now = gauge.depth()
             lambda_series[step] = lambda_now
 
         providers_act(t, lambda_now)            # 1. Providers act
@@ -592,6 +607,8 @@ def run_simulation(
         mid_price_series.append(mid_now)
         if momentum_traders and mid_now is not None:
             recent_mids.append(mid_now)
+        if gauge is not None:
+            gauge.update(mid_now)
         total_orders_series.append(book.total_orders())
         if record_sides:
             best_bid, best_ask = book.best_bid(), book.best_ask()

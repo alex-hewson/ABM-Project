@@ -270,6 +270,20 @@ python -m experiments.emini_compare model              # the same statistics for
 python -m experiments.emini_compare compare            # table and figure: results/emini/compare.png
 ```
 
+### Volatility provider trial
+
+Providers whose entry depth follows the recent volatility of the mid-price instead of Eq. 4
+(`abm/volatility_provider.py`; `docs/volatility_provider/decisions.md`, D38-D39), switched on with
+`run_simulation(volatility=VolatilitySettings(...))`. The trial runs every combination of their
+settings from the Fig. 4 setup, plus Fig. 4 and a fixed-depth control, and checks each against the
+D38 pass/fail test in trade time:
+
+```
+python -m experiments.volatility_sweep list
+sbatch cluster/volatility_sweep.slurm
+python -m experiments.volatility_sweep collect
+```
+
 ### Value trader sweep
 
 Tries 48 combinations of value trader settings (share of takers, amount of news, mean error), plus a control

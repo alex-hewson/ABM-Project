@@ -48,6 +48,16 @@ model that matches the stylised facts, with no crash needed.
 
   The starting point itself fails (a) and (b): Fig. 4's kurtosis stays near 7 at every lag (8.8, 7.1,
   6.8, 7.7) and its H is 0.21 at 1,000 trades.
+- **How "by shape" is tested** (`experiments/volatility_sweep.py`), so that every combination is judged
+  the same way. These numbers are rough on purpose:
+  - (a) kurtosis at 1 or 10 trades above 3.5; kurtosis at 100 and at 1,000 trades below that; and
+    kurtosis at 100 or 1,000 trades between 2.5 and 4.
+  - (b) H at about 1,000 trades between 0.4 and 0.6, and higher than H at 10 trades. To be revisited
+    once the trial results are in: the providers' memory W is 50–200 steps, roughly 600–2,500 trades
+    at N_A = 500, so their effect on H may only show at lags longer than 1,000 trades (e.g. a test over
+    1,000–10,000 trades). The check is redone from the saved statistics, so this needs no new runs.
+  - (c) the lag-1 autocorrelation of trade-to-trade changes below 0, and the autocorrelation of
+    100-trade changes within ±0.1 at lags 1–5.
 
 **D39. The volatility provider: the first agent to trial. [Assumed]**
 - **Idea:** a provider that places its limit orders further from the best price when recent price
@@ -110,12 +120,13 @@ model that matches the stylised facts, with no crash needed.
   (50–200 steps), or recent ÷ long-run would hardly move from 1; and short enough to adapt, so that it
   averages over the normal swings (Fig. 4's bursts last of order 100 steps, q(t) swings over about 250)
   but drifts during spells much longer than usual. 5,000 steps is 0.5% of a 10^6-step run.
-- **Decided: the start of a run.** Until W steps of mid-price changes exist, R = 1 and λ = λ₀, so the
-  providers behave as in the Fig. 3c model (fixed depth), as the momentum traders follow no trend before
-  their window fills (D31). The long-run average then starts from the first recent value and is a plain
-  average of all values so far until it holds as many as its memory, after which it fades, as the
-  momentum traders' typical size does (D31). Its first few thousand steps are therefore rough; in a
-  10^6-step run that is under 1%, but short trial runs may need to leave them out of the statistics.
+- **Decided: the start of a run.** Until W − k changes (a full window) have been seen, R = 1 and
+  λ = λ₀, so the providers behave as in the Fig. 3c model (fixed depth), as the momentum traders follow
+  no trend before their window fills (D31). The long-run average then starts from the first recent value
+  and is a plain average of all values so far until 1/count falls to its fading weight (count = half its
+  memory, 2,500 for 5,000 steps), after which it fades, as the momentum traders' typical size does
+  (D31). Its first few thousand steps are therefore rough; in a 10^6-step run that is under 1%, but
+  short trial runs leave them out of the statistics (below).
 - **Decided: two shapes of reaction, both tried, with coupling C = 1.** With R = recent volatility ÷
   long-run average (about 1 in normal times), the providers' mean entry depth is:
   - **widen only:** λ = λ₀ · (1 + C · max(R − 1, 0)). As in Eq. 4, λ₀ is a floor: providers back away
@@ -145,3 +156,20 @@ model that matches the stylised facts, with no crash needed.
   completely; there are no ordinary fixed-depth providers alongside them.
 - **Not addressed:** the size of the spread. It is set mainly by the mean entry depth λ₀ = 100 ticks;
   volatility providers would make the spread change with volatility but not make it small.
+- **Implementation** (`abm/volatility_provider.py`; `run_simulation(volatility=...)`):
+  - `VolatilityGauge` works out the depth once per step from the mid-prices up to the end of the step
+    before, and every provider receives it, as Eq. 4's λ(t) is passed in. It uses no random numbers:
+    with C = 0 a run is identical, step for step, to the fixed-depth run (tested).
+  - `VolatilityProvider` is the paper's `LiquidityProvider` with this depth: same chance to act, same
+    side choice, same exponential draw of the distance from the price.
+  - A step with one side of the book empty (no mid-price) is skipped by the gauge.
+  - Fading averages give each new value the weight 1/(average age): 2/W for the recent volatility and
+    2/L for the long-run average.
+  - R uses the long-run average from before the current value is added.
+  - The depth never goes below 1 tick, so the exponential draw stays defined. With C = 1 and the
+    "linear" form this is reached only if the mid-price has not moved at all over the whole window.
+- **Trial runs** (`experiments/volatility_sweep.py`, `cluster/volatility_sweep.slurm`): all 216
+  combinations, plus two controls: Fig. 4 itself and the same takers with a fixed depth (Fig. 3c), 218
+  jobs. Each is N_A = 500, 4 runs of 120,000 steps; the first 20,000 steps of each run are left out of
+  the statistics while the long-run averages settle. Each combination is checked against D38
+  automatically.

@@ -58,7 +58,15 @@ def run_one(task):
                        n_value_traders=round(market.get("value", 0.0) * N_AGENTS),
                        n_momentum_traders=round(market.get("momentum", 0.0) * N_AGENTS), momentum_orders=(1,),
                        **runner.PARAMS)
-    keep = r.trade_steps > 0
+    return trade_segment(r)
+
+
+def trade_segment(r, skip_steps: int = 1) -> dict:
+    """One run (run with record_sides=True and record_trades=True) as a segment for
+    analysis/stylised.py: per trade, the trade price, and the mid-price, spread and units at the best
+    prices at the end of the step before the trade's step. Trades in the first skip_steps steps are
+    left out (at least step 0, which has no step before it)."""
+    keep = r.trade_steps >= max(skip_steps, 1)
     before = r.trade_steps[keep] - 1                       # the state at the end of the step before
     bid, ask = r.best_bid_series, r.best_ask_series
     mid = (bid + ask) / 2
