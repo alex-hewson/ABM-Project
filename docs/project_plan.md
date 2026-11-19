@@ -99,7 +99,47 @@ This is the methodological foundation — everything built later is compared aga
 
 ---
 
-## Phase 2: Recovery after a flash crash or flash rally
+## Phase 2: Flash crashes that emerge from the order book
+
+### Project aim (from 17 November 2026)
+
+**A model that behaves like a normal market almost all the time, but on very rare occasions
+produces a flash crash that starts from features of the order book itself.**
+
+Set at the supervisor meeting of 17 November 2026. Recovery after a crash has already been studied
+in other papers, so creating a crash from within the model is the more interesting question. Most
+runs should show nothing of note; a crash should be rare and should not need an outside shock.
+
+**Method.** First build a model that matches the stylised facts of a real market (D37, compared with
+the E-mini data), with no crash needed. Add one kind of agent at a time and keep it only if the
+stylised facts survive (D38). Start from Preis-type agents, with providers that react to recent
+volatility (D39), then possibly value traders (D28). No model can be fully accurate: different
+parameter mixes can give the same outcome.
+
+### Earlier aim (November 2026, before 17 November): recovery
+
+**What trader behaviours drive market recovery after a flash crash in a limit order book?**
+
+Set out after a mind map of market features (supervisor meeting of 3 November 2026; plan sent to
+the supervisors in mid-November). Liquidity and volatility are not set directly: they change only
+through what the agents do. So trader behaviour is the main variable, through:
+- **Cancellations.** They remove liquidity directly (e.g. an investor pulling all their orders in a
+  stock to invest elsewhere), and many at about the same time can raise volatility.
+- **Fundamentalists** (the value traders, D28), present in most crash recovery models.
+- **Agents that respond to volatility.**
+- **Heterogeneity:** randomness between agents following the same strategy, different response
+  thresholds, and different speeds. Activity (trades per second) is linked to this.
+
+**What recovery means.** Most papers use price recovery, e.g. Leal et al. (2016): a crash is a drop
+of at least 5% that recovers within 30 minutes. Recovery of depth and of the spread is measured as
+well.
+
+**Method.** Add one feature at a time and check after each whether the model still matches the
+E-mini data (D37), so the effect of each part can be seen. No model can be fully accurate: different
+parameter mixes can give the same outcome. Calibrate on normal market data first, then try to
+recreate the crash.
+
+### Earlier direction
 
 Aim, as set by the supervisors: study how the market recovers after a large order, and validate the
 model against a traditional market using real order book data (E-mini futures data from Dr Karam,
@@ -125,19 +165,15 @@ The plan for the rest of Phase 2 is in `phase2_plan.md`.
 
 ## Immediate next steps
 
-1. Collect and read the momentum trader sweep when the cluster jobs finish
-   (`python -m experiments.momentum_sweep collect`).
-2. Check whether the response to news is proportional to the jump: jumps of 10, 30 and 100 ticks,
-   inside and beyond the value traders' spread (D32, D33).
-3. The scaling of correlation functions and phase changes (the physics supervisor's request, 20
-   October 2026): a phase diagram over the shares of value and momentum traders. Value traders pull
-   the price back, momentum traders push it on, so the market should change from recovering to
-   running away. The recovery time after a shock is a relaxation time, which may grow near the
-   boundary. To be designed before building; the momentum sweep should set its ranges.
-4. Merge the Phase 2 branches into `main`.
-5. Fat tails: providers that place their orders further from the midpoint when recent volatility is
-   high. This keeps the idea of Eq. 4 (entry depth widens in turbulent times), but providers react
-   to something they can see, the recent price changes, instead of the takers' hidden buy
-   probability. The basic model has no fat tails without it (`decisions.md`, section 5).
-6. When the E-mini data arrives: find out its form and the rules for using it, keep it out of the
-   repository, then measure order rates and the response to large orders in it.
+Following the project aim above (17 November 2026):
+1. A stable model that matches the stylised facts, with at least two kinds of agent, by the next
+   meeting (24 November 2026). Start with the volatility provider (D39): agree its parameters, build
+   it, and compare with the E-mini statistics (D37). Then possibly value traders.
+2. Ask for "normal" E-mini data to calibrate on. The days available (5 and 7 May 2010) are either
+   side of the flash crash, in a period of market stress, so they may not be typical.
+3. Then look for what in the order book could, very rarely, set off a crash.
+
+Done from the earlier list: momentum sweep collected (§18); news jump-size test (§16); phase diagram
+sweep run (§19; its finite-size analysis is still to do); Phase 2 branches merged into `main`; E-mini
+data received and kept outside the repository. Still open: fat tails, e.g. providers that place
+their orders further from the midpoint when recent volatility is high (`decisions.md`, section 5).

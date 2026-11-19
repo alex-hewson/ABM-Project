@@ -2,20 +2,24 @@
 
 An agent-based model of a limit order book, built on Preis, Golke, Paul & Schneider (2006),
 "Multi-agent-based Order Book Model of financial markets", *EPL* 75, 510. The paper is first
-reproduced as a validated baseline. The baseline is then used to study how a market recovers after
-a flash crash or flash rally, and the model is tested against real order book data.
+reproduced as a validated baseline. The aim is then a model that behaves like a normal market almost
+all the time but very rarely produces a flash crash from within the order book, tested against real
+order book data (E-mini S&P 500 futures).
 
 ## Status
 
 - **Phase 1 (done):** Figs. 2, 3 and 4 of the paper reproduced at paper scale (10⁶ steps, 50 runs
   per N_A). See [Results](#results). This version is tagged `baseline-v1`.
-- **Phase 2 (in progress):** recovery after a large order. Done so far: a shock test, orders
-  bigger than one unit, agents with different speeds and order sizes, and value traders, which make
-  the price recover. Next: tune the value traders, then set the model's parameters from E-mini
-  futures data and compare the model with it. See [docs/phase2_plan.md](docs/phase2_plan.md).
+- **Phase 2 (in progress):** flash crashes that emerge from the order book. Done so far (while the
+  aim was recovery after a crash): a shock test, orders bigger than one unit, agents of different
+  speeds and sizes, value and momentum traders, news, a Poisson trader, event studies, a phase
+  diagram of value against momentum traders, and statistics comparing the model with E-mini data.
+  Next: a stable model that matches the stylised facts, adding one kind of agent at a time, starting
+  with providers that react to recent volatility. See [docs/project_plan.md](docs/project_plan.md).
 
 Status and next steps are in [docs/project_plan.md](docs/project_plan.md). The reasoning behind
-each modelling and measurement choice is in [docs/decisions.md](docs/decisions.md). What the paper
+each modelling and measurement choice is in [docs/decisions.md](docs/decisions.md), and from D38 on
+in a folder per part of the project (e.g. [docs/volatility_provider/](docs/volatility_provider/decisions.md)). What the paper
 itself defines is summarised in [docs/paper_model.md](docs/paper_model.md), and the checks and
 comparison with the paper are in [docs/validation.md](docs/validation.md).
 

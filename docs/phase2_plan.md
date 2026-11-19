@@ -2,6 +2,11 @@
 
 Rough plan for the rest of the project. To discuss with supervisors.
 
+**Update, 17 November 2026:** the project aim is now a model that is normal almost all the time but
+very rarely produces a flash crash that starts within the order book, instead of recovery after a
+crash. The aim and method are in `project_plan.md` (Phase 2, "Project aim"). This file is the earlier
+plan, kept for reference.
+
 ## Idea
 
 Study how a market recovers after a flash crash or flash rally, not what causes it. The cause is

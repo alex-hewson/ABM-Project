@@ -11,6 +11,10 @@ Choices made in this project: what was chosen and why. Kept short on purpose.
 Decision numbers (D1, D2, ...) are fixed IDs in order of creation, not positions in this file, so
 references to them from code comments stay valid when entries are moved.
 
+**From D38 on, decisions are kept in a folder per part of the project**, numbered on from here:
+- `volatility_provider/decisions.md`: trialling agents one at a time, starting with providers that
+  react to recent volatility (D38–).
+
 ---
 
 ## 1. Model
