@@ -129,16 +129,21 @@ def test_sweep_grid_and_check():
     check("216 combinations plus 2 controls", len(sweep.GRID) == 218 and sweep.GRID[:2] == ["fig4", "fixed_depth"])
     check("every combination has its own name", len({sweep.name_of(i) for i in range(218)}) == 218)
     lags = sweep.LAGS
-    good = {"trade": {"kurtosis": {1: 12.0, 10: 6.0, 100: 3.2, 1000: 2.9},
-                      "hurst": np.where(lags < 200, 0.25, 0.5),
-                      "autocorr": {1: {"signed": np.array([-0.3])}, 100: {"signed": np.array([0.01, 0.02, -0.02, 0.0, 0.0])}}}}
-    check("an E-mini-like set of statistics passes all three", sweep.check(good)["passes"])
-    flat = {"trade": {**good["trade"], "kurtosis": {1: 8.8, 10: 7.1, 100: 6.8, 1000: 7.7}}}
+    good_price = {"kurtosis": {1: 60.0, 10: 8.6, 100: 3.5, 1000: 2.9},
+                  "hurst": np.where(lags < 200, 0.4, 0.5),
+                  "autocorr": {1: {"signed": np.array([-0.06])}, 100: {"signed": np.array([-0.01, 0.02, -0.02, 0.0, 0.0])}}}
+    bad_price = {**good_price, "kurtosis": {1: 3.2, 10: 2.6, 100: 2.5, 1000: 2.6}, "hurst": np.full(len(lags), 0.15)}
+    good = {"mid": good_price, "trade": bad_price}
+    check("the check uses the mid-price (D37)", sweep.PRICE == "mid")
+    check("an E-mini-like mid-price passes all three", sweep.check(good)["passes"])
+    check("whatever the trade price does", sweep.check({"mid": good_price, "trade": good_price})["passes"])
+    check("and a good trade price does not rescue a bad mid-price", not sweep.check({"mid": bad_price, "trade": good_price})["passes"])
+    flat = {"mid": {**good_price, "kurtosis": {1: 150, 10: 16, 100: 8.9, 1000: 8.0}}}
     check("Fig. 4-like tails that do not fade fail (a)", not sweep.check(flat)["a_fat_tails_fading"])
-    reverting = {"trade": {**good["trade"], "hurst": np.full(len(lags), 0.2)}}
+    reverting = {"mid": {**good_price, "hurst": np.full(len(lags), 0.2)}}
     check("H of 0.2 at long lags fails (b)", not sweep.check(reverting)["b_random_walk"])
-    anti = {"trade": {**good["trade"], "autocorr": {1: {"signed": np.array([-0.5])},
-                                                    100: {"signed": np.array([-0.45, 0, 0, 0, 0])}}}}
+    anti = {"mid": {**good_price, "autocorr": {1: {"signed": np.array([-0.06])},
+                                               100: {"signed": np.array([-0.32, 0, 0, 0, 0])}}}}
     check("strong anti-correlation of 100-trade changes fails (c)", not sweep.check(anti)["c_bounce_only"])
 
 
@@ -156,6 +161,28 @@ def test_sweep_end_to_end():
         with contextlib.redirect_stdout(out):
             sweep.main(["collect", "--out-dir", tmp, "--emini", str(Path(tmp) / "none.pkl")])
         check("collect works on a partly finished trial", "3 of 218" in out.getvalue())
+        check("it writes the table and the figure", (Path(tmp) / "summary.csv").exists() and (Path(tmp) / "summary.png").exists())
+
+
+def test_lambda_sweep():
+    from experiments import lambda_sweep as lam
+    check("6 values of lambda_0 for the control and 4 setups: 30 jobs", len(lam.GRID) == 30)
+    check("the controls come first", all(lam.GRID[i][0] == 1 for i in range(6)) and lam.name_of(0) == "lam30_control_fixed_depth")
+    check("the setups are the agreed four", lam.SETUPS[1:] == (105, 21, 35, 84))
+    check("every job has its own name", len({lam.name_of(i) for i in range(30)}) == 30)
+    seg, depth = sweep.simulate(sweep.GRID[105], seed=0, n_steps=1500, skip=500, lambda_0=10)
+    check("lambda_0 reaches the volatility providers: their depth is about 10, not 100", 1 <= depth["lambda_mean"] < 30)
+    seg, depth = sweep.simulate("fixed_depth", seed=0, n_steps=1500, skip=500, lambda_0=10)
+    check("and the fixed-depth control", depth["lambda_mean"] == 10)
+    with tempfile.TemporaryDirectory() as tmp:
+        tiny = ["--n-runs", "1", "--n-steps", "3000", "--skip", "500", "--workers", "1", "--out-dir", tmp]
+        with contextlib.redirect_stdout(io.StringIO()):
+            for index in (1, 7):
+                lam.main(["run", "--index", str(index), *tiny])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            lam.main(["collect", "--out-dir", tmp, "--first-dir", str(Path(tmp) / "none"), "--emini", str(Path(tmp) / "none.pkl")])
+        check("collect works on a partly finished trial", "2 of 30" in out.getvalue())
         check("it writes the table and the figure", (Path(tmp) / "summary.csv").exists() and (Path(tmp) / "summary.png").exists())
 
 

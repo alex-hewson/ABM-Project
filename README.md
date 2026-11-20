@@ -261,7 +261,8 @@ heatmap per measure, with one panel per N_A, to `results/phase_sweep/`.
 
 The E-mini data is kept outside the repository; every command takes its path and saves only
 statistics (`docs/decisions.md`, D37). The same statistics, in trade time, come from
-`analysis/stylised.py` for the data and for the model:
+`analysis/stylised.py` for the data and for the model. Prices are compared on the mid-price; the trade
+price is used only for the bid-ask bounce:
 
 ```
 python -m experiments.emini inspect PATH_TO_CSV        # what is in the file, without showing rows
@@ -276,12 +277,24 @@ Providers whose entry depth follows the recent volatility of the mid-price inste
 (`abm/volatility_provider.py`; `docs/volatility_provider/decisions.md`, D38-D39), switched on with
 `run_simulation(volatility=VolatilitySettings(...))`. The trial runs every combination of their
 settings from the Fig. 4 setup, plus Fig. 4 and a fixed-depth control, and checks each against the
-D38 pass/fail test in trade time:
+D38 pass/fail test in trade time, on the mid-price:
 
 ```
 python -m experiments.volatility_sweep list
 sbatch cluster/volatility_sweep.slurm
 python -m experiments.volatility_sweep collect
+```
+
+### Mean entry depth trial
+
+The four strongest volatility provider setups, and fixed-depth providers as a control, run with a
+smaller mean entry depth λ₀ = 30, 10, 8, 7, 6 and 5 (`docs/volatility_provider/decisions.md`, D40),
+to see whether a narrower book brings the model closer to the E-mini:
+
+```
+python -m experiments.lambda_sweep list
+sbatch cluster/lambda_sweep.slurm
+python -m experiments.lambda_sweep collect
 ```
 
 ### Value trader sweep

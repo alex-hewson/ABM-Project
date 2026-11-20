@@ -1,6 +1,7 @@
 """
 Model against E-mini: the statistics of analysis/stylised.py in trade time, for a few versions of the
-model, set beside the same statistics from the E-mini data (docs/decisions.md, D37).
+model, set beside the same statistics from the E-mini data (docs/decisions.md, D37). Prices are
+compared on the mid-price; the trade price is shown only for the bid-ask bounce.
 
     python -m experiments.emini_compare model --workers 8          # runs the model markets below
     python -m experiments.emini_compare compare                    # table and figure, model against data
@@ -31,7 +32,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from abm.simulation import run_simulation
-from analysis.stylised import AUTOCORR, KURTOSIS_LAGS, LAGS, TAIL_LEVELS, stylised_facts, summary_rows
+from analysis.stylised import AUTOCORR, KURTOSIS_LAGS, LAGS, PRICE, TAIL_LEVELS, stylised_facts, summary_rows
 from experiments import run as runner
 from experiments.provenance import describe, git_info
 
@@ -129,30 +130,31 @@ def compare(out_dir: Path, names) -> None:
     (a, b, c), (d, e, f) = axes
     for s, label, colour in zip(sets, labels, colours):
         lw = 2 if colour == "k" else 1.1
-        t = s["trade"]
+        t = s[PRICE]                      # the mid-price (D37); the trade price only for the bounce in (d)
         a.plot(LAGS, t["rms"], color=colour, lw=lw, label=label)
         b.plot(LAGS, t["hurst"], color=colour, lw=lw, label=label)
         c.plot(TAIL_LEVELS, t["tail"][100], color=colour, lw=lw, label=label)
         n1 = AUTOCORR[1]
         d.plot(range(1, n1 + 1), t["autocorr"][1]["signed"], "o-", ms=3, color=colour, lw=lw, label=label)
+        d.plot(range(1, n1 + 1), s["trade"]["autocorr"][1]["signed"], ":", color=colour, lw=lw)
         n100 = AUTOCORR[100]
         e.plot(range(1, n100 + 1), t["autocorr"][100]["absolute"], color=colour, lw=lw, label=label)
         f.plot(KURTOSIS_LAGS, [t["kurtosis"][lag] for lag in KURTOSIS_LAGS], "o-", color=colour, lw=lw, label=label)
     gauss = np.array([np.mean(np.abs(np.random.default_rng(0).standard_normal(200_000)) >= x) for x in TAIL_LEVELS])
     c.plot(TAIL_LEVELS, gauss, "k:", lw=1, label="normal distribution")
-    a.set(xscale="log", yscale="log", xlabel="lag [trades]", ylabel="RMS change of the trade price [ticks]",
+    a.set(xscale="log", yscale="log", xlabel="lag [trades]", ylabel="RMS change of the mid-price [ticks]",
           title="(a) size of price changes against lag")
     b.axhline(0.5, color="gray", lw=0.6, ls=":")
     b.set(xscale="log", xlabel="lag [trades]", ylabel="H", title="(b) Hurst exponent (local slope of (a))")
     c.set(xscale="log", yscale="log", xlabel="|change| / standard deviation", ylabel="share at least this large",
-          title="(c) tails of 100-trade changes", ylim=(1e-6, 1.5))
+          title="(c) tails of 100-trade mid changes", ylim=(1e-6, 1.5))
     d.axhline(0, color="gray", lw=0.6, ls=":")
-    d.set(xlabel="lag [trades]", ylabel="autocorrelation", title="(d) trade-to-trade changes (bid-ask bounce)")
+    d.set(xlabel="lag [trades]", ylabel="autocorrelation", title="(d) trade-to-trade changes: mid-price (solid), trade price (dotted, bid-ask bounce)")
     e.axhline(0, color="gray", lw=0.6, ls=":")
     e.set(xlabel="lag [blocks of 100 trades]", ylabel="autocorrelation",
-          title="(e) size of 100-trade changes (volatility clustering)")
+          title="(e) size of 100-trade mid changes (volatility clustering)")
     f.axhline(3, color="gray", lw=0.6, ls=":")
-    f.set(xscale="log", xlabel="lag [trades]", ylabel="kurtosis", title="(f) kurtosis of changes (normal = 3)")
+    f.set(xscale="log", xlabel="lag [trades]", ylabel="kurtosis", title="(f) kurtosis of mid changes (normal = 3)")
     for ax in axes.flat:
         ax.title.set_fontsize(10)
     a.legend(fontsize=8)

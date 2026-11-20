@@ -31,6 +31,10 @@ TAIL_LAGS = (10, 100, 1000)
 TAIL_LEVELS = np.logspace(-1, np.log10(30), 40)        # |change| in units of its standard deviation
 AUTOCORR = {1: 20, 100: 50}                            # interval in trades: number of lags
 PRICES = ("trade", "mid")
+# The price that model and data are compared on (D37): the mid-price. The trade price jumps back and
+# forth between bid and ask (the bid-ask bounce), which adds a reversal that is not a move of the
+# price itself, so it is kept only to measure that bounce.
+PRICE = "mid"
 
 
 def changes(segments: Sequence[Dict[str, np.ndarray]], kind: str, lag: int) -> np.ndarray:
@@ -110,21 +114,25 @@ def stylised_facts(segments: Sequence[Dict[str, np.ndarray]]) -> dict:
 
 
 def summary_rows(facts: dict) -> List[tuple]:
-    """(label, value) pairs for a side-by-side table."""
-    t = facts["trade"]
+    """(label, value) pairs for a side-by-side table. Price statistics are of the mid-price (PRICE, D37),
+    except the bid-ask bounce, which only the trade price has."""
+    t = facts[PRICE]
     rows = [("trades", f"{facts['n_trades']:,}"),
-            ("trades with no price change", f"{t['zero_steps']:.0%}"),
+            ("trades with no mid-price change", f"{t['zero_steps']:.0%}"),
+            ("trades with no trade-price change", f"{facts['trade']['zero_steps']:.0%}"),
             ("mean spread (ticks)", f"{facts['spread']['mean']:.2f}"),
             ("spread of 1 tick", f"{facts['spread']['shares'][1]:.0%}"),
             ("median units at best price", f"{facts['best_size']['quantiles'][50]:g}")]
     if "trade_size" in facts:
         rows.append(("median trade / median best size", f"{facts['trade_size']['per_best_size']:.3f}"))
     for lag in KURTOSIS_LAGS:
-        rows.append((f"kurtosis, {lag}-trade changes", f"{t['kurtosis'][lag]:.1f}"))
+        rows.append((f"kurtosis, {lag}-trade mid changes", f"{t['kurtosis'][lag]:.1f}"))
     i = list(LAGS).index(min(LAGS, key=lambda x: abs(x - 1000)))
     j = list(LAGS).index(min(LAGS, key=lambda x: abs(x - 10)))
     rows += [("H at 10 trades", f"{t['hurst'][j]:.2f}"), ("H at 1000 trades", f"{t['hurst'][i]:.2f}"),
-             ("autocorr. of trade-to-trade changes, lag 1", f"{t['autocorr'][1]['signed'][0]:+.2f}"),
-             ("autocorr. of |100-trade changes|, lag 1", f"{t['autocorr'][100]['absolute'][0]:+.2f}"),
-             ("autocorr. of |100-trade changes|, lag 10", f"{t['autocorr'][100]['absolute'][9]:+.2f}")]
+             ("autocorr. of trade-to-trade mid changes, lag 1", f"{t['autocorr'][1]['signed'][0]:+.2f}"),
+             ("bid-ask bounce (trade price, lag 1)", f"{facts['trade']['autocorr'][1]['signed'][0]:+.2f}"),
+             ("autocorr. of 100-trade mid changes, lag 1", f"{t['autocorr'][100]['signed'][0]:+.2f}"),
+             ("autocorr. of |100-trade mid changes|, lag 1", f"{t['autocorr'][100]['absolute'][0]:+.2f}"),
+             ("autocorr. of |100-trade mid changes|, lag 10", f"{t['autocorr'][100]['absolute'][9]:+.2f}")]
     return rows

@@ -14,9 +14,9 @@ almost all the time but very rarely produces a flash crash from within. The firs
 model that matches the stylised facts, with no crash needed.
 - **Starting point:** the Preis Fig. 4 model (mean-reverting order flow with volatility-coupled entry
   depth, Eq. 4, D21). It is the only version so far with fat tails and volatility clustering: in trade
-  time (D37) the kurtosis of 100-trade changes is 6.8 (2.5 for the paper's Fig. 2 agents) and the
-  autocorrelation of the size of 100-trade changes is +0.42 at lag 1 and +0.30 at lag 10 (+0.08 and
-  +0.01 for Fig. 2). Its weak points: the spread is about 200 ticks (E-mini: 1), and its stylised
+  time, on the mid-price (D37), the kurtosis of 100-trade changes is 8.9 (2.9 for the paper's Fig. 2
+  agents) and the autocorrelation of the size of 100-trade changes is +0.42 at lag 1 and +0.28 at
+  lag 10 (+0.05 and 0.00 for Fig. 2). Its weak points: the spread is about 200 ticks (E-mini: 1), and its stylised
   facts come from a hidden quantity, the takers' buy probability q(t), which no trader can see.
 - **One agent at a time.** Each new kind of agent is added to the starting point on its own and kept
   only if the model keeps or gains stylised facts when checked against the E-mini data (D37);
@@ -24,30 +24,37 @@ model that matches the stylised facts, with no crash needed.
 - **Theory first.** The reasoning behind each agent and the meaning of each of its parameters are
   checked and agreed before the agent is implemented.
 - **Decided: pass/fail by shape, as a crude first cut of very bad setups.** A setup passes if, in trade
-  time (D37), it shows all three of:
+  time and on the mid-price (D37), it shows all three of:
   - **(a) fat tails that fade with lag:** kurtosis of the price changes above 3 at short lags (1–10
-    trades), falling as the lag grows, and close to 3 by 100–1,000 trades. E-mini: 12.6, 5.9, 3.2 and
-    2.9 at 1, 10, 100 and 1,000 trades (aggregational Gaussianity).
+    trades), falling as the lag grows, and close to 3 by 100–1,000 trades. E-mini: 60.9, 8.6, 3.5 and
+    2.9 at 1, 10, 100 and 1,000 trades (aggregational Gaussianity). At 1–10 trades most of this comes
+    from how rarely the mid-price moves, not from large moves: the E-mini's mid-price is unchanged
+    over 98% of trades, and a change that is zero most of the time and ±1 tick with chance p has
+    kurtosis 1/p (here about 42) with no large moves at all.
   - **(b) a random walk at long lags:** H rising towards 0.5 and close to it beyond a few hundred
-    trades. E-mini: 0.24 at 10 trades, 0.51 at 1,000.
+    trades. E-mini: 0.41 at 10 trades, 0.51 at 1,000.
   - **(c) a bounce and nothing else:** negative autocorrelation of trade-to-trade changes at lag 1
-    (E-mini −0.32), and the autocorrelation of 100-trade changes close to zero (E-mini within ±0.02 at
-    lags 1–5).
+    (E-mini −0.06; the trade price's bid-ask bounce, −0.32, is not part of the test), and the
+    autocorrelation of 100-trade changes close to zero (E-mini −0.01 to +0.01 at lags 1–5).
+
+  The first version of these tests, and of the trial results (D39), used the trade price by mistake;
+  both were redone on the mid-price on 20 November 2026 (D37).
 
   Judged by shape, not by distance from the E-mini numbers: the E-mini statistics come from two days
   in a stressed week next to the flash crash (5 and 7 May 2010), so they are rough targets. Closer
   matching comes later.
 
   Left out for now:
-  - **volatility clustering:** in trade time it is almost absent in the E-mini (+0.01 at lag 1, +0.03
+  - **volatility clustering:** in trade time it is almost absent in the E-mini (−0.02 at lag 1, +0.04
     at lag 10 for the size of 100-trade changes), because counting time in trades removes most of it;
     it needs a clock-time comparison to be judged fairly.
   - **spread and depth:** far from the E-mini in every version of the model (Fig. 4: spread 207 ticks
     against 1; median trade ÷ size at the best price 1.0 against 0.012), but set mainly by λ₀, which
     the volatility provider does not change (D39).
 
-  The starting point itself fails (a) and (b): Fig. 4's kurtosis stays near 7 at every lag (8.8, 7.1,
-  6.8, 7.7) and its H is 0.21 at 1,000 trades.
+  The starting point itself fails all three: Fig. 4's kurtosis does not come down to 3 (150, 16, 8.9
+  and 8.0 at 1, 10, 100 and 1,000 trades), its H is 0.47 at both 10 and 1,000 trades, and its
+  100-trade changes have an autocorrelation of −0.31 at lag 1.
 - **How "by shape" is tested** (`experiments/volatility_sweep.py`), so that every combination is judged
   the same way. These numbers are rough on purpose:
   - (a) kurtosis at 1 or 10 trades above 3.5; kurtosis at 100 and at 1,000 trades below that; and
@@ -56,10 +63,11 @@ model that matches the stylised facts, with no crash needed.
     once the trial results are in: the providers' memory W is 50–200 steps, roughly 600–2,500 trades
     at N_A = 500, so their effect on H may only show at lags longer than 1,000 trades (e.g. a test over
     1,000–10,000 trades). The check is redone from the saved statistics, so this needs no new runs.
-    **Revisited after the trial (D39, trial results):** H at 1,000 trades is about 0.15 in every
-    combination and in both controls, and every one of them reaches 0.5 somewhere between 2,000 and
-    6,000 trades. A test over 1,000–10,000 trades would therefore let everything pass, controls
-    included, and would not separate one setup from another. Whether to change (b): **[Open]**.
+    **Revisited after the trial (D39, trial results):** on the mid-price, H at 1,000 trades is
+    0.27–0.55 (median 0.37; 0.37 for the fixed-depth control, 0.47 for Fig. 4), and all but one
+    combination reach 0.5 somewhere between about 950 and 3,400 trades. A test over 1,000–10,000
+    trades would therefore let nearly everything pass, controls included, and would not separate one
+    setup from another. Whether to change (b): **[Open]**.
   - (c) the lag-1 autocorrelation of trade-to-trade changes below 0, and the autocorrelation of
     100-trade changes within ±0.1 at lags 1–5.
 
@@ -177,26 +185,32 @@ model that matches the stylised facts, with no crash needed.
   jobs. Each is N_A = 500, 4 runs of 120,000 steps; the first 20,000 steps of each run are left out of
   the statistics while the long-run averages settle. Each combination is checked against D38
   automatically.
-- **Trial results (19 November 2026).** All 218 jobs finished (`results/volatility_sweep/summary.csv`
-  and `summary.png`). There are about 12.5 trades per step in every run, so 1,000 trades is about 80
-  steps. No mid-price gaps occurred.
-  - **No combination passes all three tests.** 38 of 216 pass (a), none pass (b) and none pass (c).
-  - **(b) and (c) do not depend on the providers.** The values are almost the same in every
+- **Trial results (19 November 2026; redone on the mid-price on 20 November, D37).** All 218 jobs
+  finished (`results/volatility_sweep/summary.csv` and `summary.png`). There are about 12.5 trades per
+  step in every run, so 1,000 trades is about 80 steps. No mid-price gaps occurred. The first
+  write-up used the trade price by mistake; the numbers below are all for the mid-price, apart from
+  the bid-ask bounce.
+  - **No combination passes all three tests.** 136 of 216 pass (a), 1 passes (b) and 4 pass (c).
+  - **(b) and (c) do not depend on the providers.** The values are almost the same in every stable
     combination and in both controls:
 
-    | | Model (all 218 runs) | E-mini |
+    | | Model | E-mini |
     |---|---|---|
-    | H at 1,000 trades | 0.10–0.21, nearly all 0.15 | 0.51 |
-    | H first reaches 0.5 at | about 3,400 trades (Fig. 4), about 5,600 (fixed depth) | about 100 trades |
-    | lag-1 autocorrelation of trade-to-trade changes (bounce) | −0.49 | −0.32 |
-    | autocorrelation of 100-trade changes, lag 1 | −0.45 to −0.50 | about 0 |
+    | H at 1,000 trades | 0.27–0.55 (median 0.37; fixed depth 0.37, Fig. 4 0.47) | 0.51 |
+    | H first reaches 0.5 at | about 950–3,400 trades (fixed depth about 2,000) | about 125 trades |
+    | autocorrelation of trade-to-trade changes, lag 1 | 0.00 | −0.06 |
+    | autocorrelation of 100-trade changes, lag 1 | −0.37 to −0.06 (stable setups −0.35 to −0.25; controls −0.32, −0.31) | −0.01 |
+    | bid-ask bounce (trade price, lag 1; not tested) | −0.49 | −0.32 |
 
-    Part of this comes from the spread. At about 24 ticks it is wide compared with how far the price
-    moves over 100 trades, so trade prices jump back and forth across it. The mid-price also
-    reverts, though: in both controls its H falls to about 0.24 at 75–270 trades and only reaches
-    0.5 at about 1,000–2,000 trades, and its 100-trade changes have an autocorrelation of −0.32 at lag 1.
-    The model's prices therefore move back towards earlier levels over roughly 10–200 steps, with or
-    without volatility providers. This matches the Preis model's own H below 0.5 at short times.
+    The only combinations that pass (b) or (c) are four linear ones with W = 50 and L = 5,000 or
+    20,000, where the spread has collapsed to 1–3 ticks (see the linear form below). The one that
+    passes (b) has a kurtosis of about 500 even at 1,000 trades.
+
+    In both controls the mid-price H falls to about 0.24 at 75–270 trades and only reaches 0.5 at
+    about 1,200–2,000 trades. The model's prices therefore move back towards earlier levels over
+    roughly 10–200 steps, with or without volatility providers. This matches the Preis model's own H
+    below 0.5 at short times, and the strong negative autocorrelation of prices that Farmer, Patelli
+    and Zovko (2005) and Smith et al. (2003) report for order books with random order flow.
 
     The volatility provider changes only the mean distance λ at which providers place their orders,
     and how it varies over time. Everything else is the same in every run of the trial:
@@ -215,25 +229,29 @@ model that matches the stylised facts, with no crash needed.
       faded by about 80–160 steps (1,000–2,000 trades), a few order lifetimes.
     - **H above 0.5 at about 10,000 trades comes from the takers (untested).** q(t) stays away from 1/2
       for about 250 steps at a time, so the order flow leans one way and the price drifts over that
-      time. That gives H of 0.6–0.66 at long lags.
+      time. That gives a mid-price H of 0.64–0.68 at about 12,000 trades.
 
     Varying δ or λ₀ with fixed-depth providers would test the first two.
-  - **(a) passes only weakly.** The kurtosis curves that pass are flat after the first lag, e.g.
-    4.9, 3.9, 3.8 and 3.8 at 1, 10, 100 and 1,000 trades (`std_k5_W50_fading_L1000_linear`),
-    against the E-mini's 12.6, 5.9, 3.2 and 2.9. No combination shows tails that fade with lag the
-    way the E-mini's do. The passes are 27 linear with L = 1,000, 4 linear with L = 5,000, and 7 widen
-    (W = 50 or 100 with L = 5,000 or 20,000).
+  - **(a) passes for every widen combination, but it says little.** All 108 widen combinations pass,
+    with median kurtosis 53, 5.7, 3.1 and 2.7 at 1, 10, 100 and 1,000 trades, against the E-mini's
+    60.9, 8.6, 3.5 and 2.9. The fixed-depth control passes too (50.9, 5.4, 2.9, 2.6), so the pass does
+    not come from the volatility provider. At 1–10 trades the values mostly reflect how rarely the
+    mid-price moves (unchanged over 93% of trades in the model, 98% in the E-mini; see D38 (a)). At
+    100 and 1,000 trades the model is slightly below 3, so its tails there are thinner than a normal
+    distribution's; the E-mini is at or slightly above 3.
   - **Widen form: a small effect at C = 1.** Mean depth is 104–112 ticks and the largest depth 207
-    ticks (median; 350 at most). The statistics stay close to the fixed-depth control (median
-    kurtosis 3.4, 2.7, 2.6, 2.7).
-  - **Linear form with long memory (L = 5,000 or 20,000): unstable.** In 35 of these 72 combinations
-    the depth reaches the 1-tick floor. With W = 50 the median spread falls to about 7 ticks, the
-    mean depth to about 26 ticks and the kurtosis at 1 trade rises to about 55. At worst the spread
-    is 1.2 ticks and the kurtosis 569 (`abs_k20_W50_fixed_L20000_linear`). A likely cause is a
+    ticks (median; 350 at most). The statistics stay close to the fixed-depth control.
+  - **Linear form: tails that do not fade, and unstable with long memory.** With L = 1,000 the
+    kurtosis comes down more slowly than the E-mini's (median 68, 7.3, 3.9, 3.6), and 12 of the 36
+    combinations fail (a). With L = 5,000 or 20,000 the kurtosis stays high at every lag (median 7.4
+    and 6.8 at 100 and 1,000 trades for L = 5,000; 20 and 22 for L = 20,000). In 35 of these 72
+    combinations the depth reaches the 1-tick floor. With W = 50 the median spread falls to about 7
+    ticks and the median kurtosis is 870, 92, 48 and 48. At worst the spread is 1.2 ticks and the
+    kurtosis 13,858, 1,414, 683 and 504 (`abs_k20_W50_fixed_L20000_linear`). A likely cause is a
     narrowing loop: in a quiet spell the depth drops below λ₀, so orders sit closer to the price and
     price changes get smaller, so recent volatility falls further below the slowly moving long-run
-    average, and the depth drops again. With W = 200 the effect is small (spread about 24, kurtosis
-    at 1 trade about 8). The linear form with L = 1,000 stays stable (spread 23.5–24.4 ticks).
+    average, and the depth drops again. With W = 200 the spread stays at about 24 ticks. The linear
+    form with L = 1,000 stays stable (spread 23.5–24.4 ticks).
   - **Settings that hardly matter:** the measure (std or abs), k (5, 10, 20) and fixed against fading
     memory change the results very little. Only W and L matter: a shorter W and a longer L give
     larger and more variable depths and higher kurtosis.
@@ -241,3 +259,66 @@ model that matches the stylised facts, with no crash needed.
     the trial held fixed (the takers, λ₀ and cancellation), which give the wide spread and the
     reverting price. It does not come from how the providers react to volatility. Whether
     to keep the volatility provider, change it or throw it out (D38): **[Open]**.
+
+**D40. Narrower books: the four strongest setups at λ₀ = 30, 10, 8, 7, 6 and 5. [Assumed]**
+- **Why.** In the first trial (D39) tests (b) and (c) fail in every stable setup and in both
+  controls, all at λ₀ = 100. Prices in order books with random order flow are known to be
+  anti-correlated at short times (Farmer, Patelli and Zovko 2005; Smith et al. 2003), and Smith et
+  al. find the effect weaker when ticks are coarse compared with the typical price scale. The model's
+  book is also in a different regime from the E-mini. Wyart et al. (2008) separate large-tick
+  markets, where the spread is nearly always one tick and the queue at the best price is far larger
+  than a trade (trade ÷ queue about 0.01), from small-tick ones (about 0.2–0.3). The E-mini is
+  large-tick (spread 1.02 ticks, 99% of the time at one tick, trade ÷ queue 0.012); the model at
+  λ₀ = 100 is not even small-tick (spread 24 ticks, never one tick, trade ÷ queue 0.5). The first
+  trial varied the depth over time around λ₀ = 100 but never changed λ₀ itself.
+- **Values.** At λ₀ = 100 the spread is about λ₀ ÷ 4, which puts the E-mini's one tick at λ₀ ≈ 4.
+  A second estimate from the queue: the book holds about 1,200 orders per side at N_A = 500 whatever
+  λ₀ is (Eq. 3); spread over about λ₀ ticks, the queue at the best price is roughly 1,200 ÷ λ₀, and
+  the E-mini's queue is about 80 trades, which puts λ₀ near 15. This is rough, since market orders
+  eat the orders nearest the mid-price.
+
+  A check before the trial (fixed-depth providers, one run of 15,000 steps, the first 3,000 left
+  out) found a lower limit:
+
+  | λ₀ | spread (ticks) | median queue at the best price | trades that move the mid-price |
+  |---|---|---|---|
+  | 10 | 2.4 | 14 | 3.7% |
+  | 5 | – | – | 0.54% |
+  | 3 | 1.00 | 164 | 0% |
+  | 2 | 1.00 | 325 | 0% |
+  | E-mini | 1.02 | 173 | 2.4% |
+
+  At λ₀ = 3 and below the queues are so long that the takers never empty one, and the price does not
+  move at all; none of the D38 statistics can be computed. The E-mini's mid-price moves on 2.4% of
+  trades, between λ₀ = 5 and 10. **Decided:** λ₀ = 30, 10, 8, 7, 6 and 5. Not chosen: 3, 2 and 1
+  (a frozen price).
+- **Setups.** The first trial's top ten (stable, passing (a) on the mid-price, closest to the
+  E-mini) were mostly copies of one setup, since the measure, k and fixed against fading memory
+  hardly matter (D39). **Decided:** one setup from each group of form, W and L that behaves
+  differently, the closest to the E-mini in its group:
+
+  | Setup | Reaction | W | L | κ₁₀₀ / κ₁₀₀₀ at λ₀ = 100 |
+  |---|---|---|---|---|
+  | 105 (`std_k20_W200_fading_L1000_linear`) | both ways | 200 | 1,000 | 3.29 / 2.93 |
+  | 21 (`std_k5_W100_fading_L1000_linear`) | both ways | 100 | 1,000 | 3.59 / 3.30 |
+  | 35 (`std_k5_W200_fading_L5000_linear`) | both ways | 200 | 5,000 | 4.19 / 3.71 |
+  | 84 (`std_k20_W50_fading_L20000_widen`) | outward only | 50 | 20,000 | 3.17 / 2.82 |
+
+  "Closest" uses |H₁₀₀₀ − 0.51| ÷ 0.1 + |ρ₁₀₀ + 0.01| ÷ 0.1 + |κ₁₀₀ − 3.5| + |κ₁₀₀₀ − 2.9|. The
+  weighting is a choice for ranking only, not a test. The outward-only groups all behave alike and
+  close to the fixed-depth control, so one stands for them.
+- **Controls.** Fixed-depth providers at every λ₀, to tell the effect of a narrower book from the
+  effect of the volatility providers in it.
+- **Judging.** As in the first trial: D38 on the mid-price. A setup that loses its fat tails (fails
+  (a)) at a smaller λ₀ is dropped. Also reported, though not pass/fail: the share of trades that
+  move the mid-price, the spread and its share at one tick, and the median queue at the best price.
+- **What changes at small λ₀.**
+  - The providers' mean depth cannot go below 1 tick (D39). At λ₀ = 5 the linear form reaches this
+    floor when R falls below 0.2, so it rarely matters.
+  - The depth draws are coarse: at λ₀ = 5 most orders land 0–10 ticks from the mid-price.
+  - Orders are placed on their own side of the mid-price, so they never cross the spread (D6).
+  - Trades per step (about 12.5) do not depend on λ₀, so the trade-time scale is unchanged.
+- **Runs** (`experiments/lambda_sweep.py`, `cluster/lambda_sweep.slurm`): 5 setups (the control and
+  the four) × 6 values of λ₀ = 30 jobs. Each is the same as in the first trial: mean-reverting
+  takers, N_A = 500, 4 runs of 120,000 steps, the first 20,000 left out. `collect` sets the first
+  trial's λ₀ = 100 results beside them.

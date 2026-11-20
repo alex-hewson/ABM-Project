@@ -1,7 +1,7 @@
 """
 Volatility provider trial (docs/volatility_provider/decisions.md, D38, D39): every combination of the
 volatility provider's settings, run from the Fig. 4 setup with Eq. 4 replaced, and judged by the
-pass/fail check of D38 in trade time (analysis/stylised.py, D37).
+pass/fail check of D38 in trade time, on the mid-price (analysis/stylised.py, D37).
 
 Every combination of:
 
@@ -45,7 +45,7 @@ import numpy as np
 
 from abm.simulation import run_simulation
 from abm.volatility_provider import VolatilitySettings
-from analysis.stylised import KURTOSIS_LAGS, LAGS, stylised_facts
+from analysis.stylised import KURTOSIS_LAGS, LAGS, PRICE, stylised_facts
 from experiments import run as runner
 from experiments.emini_compare import trade_segment
 from experiments.provenance import describe, git_info
@@ -81,7 +81,13 @@ def name_of(index: int) -> str:
 def run_one(task):
     """One run of one combination: its trade-time segment, and how the depth behaved."""
     index, seed, n_steps, skip = task
-    g = GRID[index]
+    return simulate(GRID[index], seed, n_steps, skip)
+
+
+def simulate(g, seed: int, n_steps: int, skip: int, lambda_0: float = runner.PARAMS["lambda_"]):
+    """One run of a grid entry g (a control name or VolatilitySettings) with mean entry depth lambda_0:
+    its trade-time segment, and how the depth behaved. Also used by the lambda_0 trial (D40)."""
+    params = {**runner.PARAMS, "lambda_": lambda_0}
     flow = runner.make_flow("mean-reverting")
     if g == "fig4":
         extra = dict(depth_coupling=10.0, q_rms=flow.stationary_rms)
@@ -90,11 +96,11 @@ def run_one(task):
     else:
         extra = dict(volatility=g)
     r = run_simulation(n_agents=N_AGENTS, n_steps=n_steps, seed=seed, keep_trades=False, record_sides=True,
-                       record_trades=True, taker_flow=flow, **extra, **runner.PARAMS)
-    lam = r.lambda_series[skip:] if len(r.lambda_series) else np.full(n_steps - skip, float(runner.PARAMS["lambda_"]))
+                       record_trades=True, taker_flow=flow, **extra, **params)
+    lam = r.lambda_series[skip:] if len(r.lambda_series) else np.full(n_steps - skip, float(lambda_0))
     return trade_segment(r, skip), {"lambda_mean": float(lam.mean()), "lambda_min": float(lam.min()),
                                     "lambda_max": float(lam.max()),
-                                    "lambda_over_2x": float(np.mean(lam > 2 * runner.PARAMS["lambda_"])),
+                                    "lambda_over_2x": float(np.mean(lam > 2 * lambda_0)),
                                     "mid_gaps": int(sum(m is None for m in r.mid_price_series))}
 
 
@@ -103,8 +109,8 @@ def nearest(lag: int) -> int:
 
 
 def check(facts: dict) -> dict:
-    """The three D38 tests, each True or False, and whether all pass."""
-    t = facts["trade"]
+    """The three D38 tests, each True or False, and whether all pass. They use the mid-price (D37)."""
+    t = facts[PRICE]
     k = t["kurtosis"]
     short, long_ = max(k[1], k[10]), (k[100], k[1000])
     fat_fading = (short > FAT_TAILS_SHORT and k[100] < short and k[1000] < short
@@ -143,7 +149,7 @@ def run_index(index: int, workers: int, n_runs: int, n_steps: int, skip: int, ou
 
 
 def row_of(data: dict) -> dict:
-    t, g = data["facts"]["trade"], data["settings"]
+    t, g = data["facts"][PRICE], data["settings"]
     row = {"index": data["index"], "name": data["name"]}
     if isinstance(g, str):
         row.update(measure="", k="", window="", memory="", long_memory="", form="")
@@ -151,7 +157,8 @@ def row_of(data: dict) -> dict:
         row.update(measure=g.measure, k=g.k, window=g.window, memory=g.memory, long_memory=g.long_memory, form=g.form)
     row.update({f"kurtosis_{lag}": t["kurtosis"][lag] for lag in KURTOSIS_LAGS})
     row.update({"H_10": t["hurst"][nearest(10)], "H_1000": t["hurst"][nearest(1000)],
-                "bounce": t["autocorr"][1]["signed"][0], "ac100_lag1": t["autocorr"][100]["signed"][0],
+                "ac1": t["autocorr"][1]["signed"][0], "ac100_lag1": t["autocorr"][100]["signed"][0],
+                "trade_bounce": data["facts"]["trade"]["autocorr"][1]["signed"][0],
                 "spread": data["facts"]["spread"]["mean"]})
     row.update(data["depth"])
     row.update(data["check"])
@@ -179,11 +186,11 @@ def collect(out_dir: Path, emini: Path) -> list:
         writer.writerows(rows)
 
     print(f"\n{'combination':42} | {'k(1)':>5} {'k(10)':>5} {'k(100)':>6} {'k(1e3)':>6} | {'H(10)':>5} {'H(1e3)':>6} | "
-          f"{'bounce':>6} {'ac100':>6} | {'depth':>5} {'max':>5} | a b c")
+          f"{'ac1':>6} {'ac100':>6} | {'depth':>5} {'max':>5} | a b c")
     shown = [r for r in rows if r["name"].startswith("control")] + [r for r in rows if r["passes"]]
     for r in shown:
         print(f"{r['name']:42} | {r['kurtosis_1']:5.1f} {r['kurtosis_10']:5.1f} {r['kurtosis_100']:6.1f} "
-              f"{r['kurtosis_1000']:6.1f} | {r['H_10']:5.2f} {r['H_1000']:6.2f} | {r['bounce']:+6.2f} {r['ac100_lag1']:+6.2f} | "
+              f"{r['kurtosis_1000']:6.1f} | {r['H_10']:5.2f} {r['H_1000']:6.2f} | {r['ac1']:+6.2f} {r['ac100_lag1']:+6.2f} | "
               f"{r['lambda_mean']:5.0f} {r['lambda_max']:5.0f} | "
               + " ".join("y" if r[key] else "-" for key in ("a_fat_tails_fading", "b_random_walk", "c_bounce_only")))
     passes = sum(r["passes"] for r in rows)
@@ -206,15 +213,15 @@ def collect(out_dir: Path, emini: Path) -> list:
     for i, d in enumerate([d for d in datas if d["check"]["passes"]][:8]):
         curves.append((d["name"], d["facts"], f"C{i % 3}", 0.8))
     for label, facts, colour, lw in curves:
-        t = facts["trade"]
+        t = facts[PRICE]
         a.plot(KURTOSIS_LAGS, [t["kurtosis"][lag] for lag in KURTOSIS_LAGS], "o-", color=colour, lw=lw, ms=3, label=label)
         b.plot(LAGS, t["hurst"], color=colour, lw=lw, label=label)
     a.axhline(3, color="gray", lw=0.6, ls=":")
-    a.set(xscale="log", xlabel="lag [trades]", ylabel="kurtosis of price changes", title="(a) fat tails fading with lag")
+    a.set(xscale="log", xlabel="lag [trades]", ylabel="kurtosis of mid-price changes", title="(a) fat tails fading with lag")
     b.axhline(0.5, color="gray", lw=0.6, ls=":")
-    b.set(xscale="log", xlabel="lag [trades]", ylabel="H", title="(b) Hurst exponent")
+    b.set(xscale="log", xlabel="lag [trades]", ylabel="H (mid-price)", title="(b) Hurst exponent")
     a.legend(fontsize=6)
-    fig.suptitle(f"Volatility provider trial (N$_A$ = {N_AGENTS}, trade time): {passes} combinations pass D38", fontsize=11)
+    fig.suptitle(f"Volatility provider trial (N$_A$ = {N_AGENTS}, trade time, mid-price): {passes} combinations pass D38", fontsize=11)
     fig.text(0.995, 0.005, "code version: " + describe(datas[0]["git"]), ha="right", va="bottom", fontsize=7, color="gray")
     fig.tight_layout()
     fig.savefig(out_dir / "summary.png", dpi=120)

@@ -411,9 +411,19 @@ Asked for by the supervisors: comparable statistics for the model and the real m
 - **Per trade:** the trade price, and the mid-price, spread and units at the best bid and ask of the
   last quote before it. In the model, whose state is only recorded at the end of each step, they are
   taken from the end of the step before the trade's step.
+- **Price compared: the mid-price.** Every price statistic of model and data is compared on the
+  mid-price in force at each trade. A trade price is either the bid or the ask, so it jumps back and
+  forth across the spread (the bid-ask bounce). That adds a reversal that is not a move of the price
+  itself, and its size depends on the spread, which is about 1 tick in the E-mini and 20–200 ticks
+  in the model. The trade price is kept only to measure the bounce. The choice is set in one place
+  (`PRICE` in `analysis/stylised.py`); both prices' statistics are stored. D11 (the median trade
+  price per step) is for reproducing the paper's Fig. 2c only.
+  Until 20 November 2026 the tables, the D38 tests and the volatility provider trial read the
+  trade-price statistics by mistake; they were then redone on the mid-price from the stored
+  statistics (`docs/volatility_provider/decisions.md`, D38, D39).
 - **Statistics:** RMS change and H against lag; kurtosis and tails of the changes; autocorrelation
-  of trade-to-trade changes (bid-ask bounce) and of the size of 100-trade changes (volatility
-  clustering); spread; units at the best price; trade size relative to them.
+  of trade-to-trade changes and of the size of 100-trade changes (volatility clustering); the
+  bid-ask bounce (trade price); spread; units at the best price; trade size relative to them.
 - **Model markets:** the paper's agents (Fig. 2), Fig. 4, and 20% value traders with 10% and with
   30% momentum traders, one on each side of the boundary of D36. N_A = 500, 4 runs of 10^5 steps
   each (about 5 million trades per market).
