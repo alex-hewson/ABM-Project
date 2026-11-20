@@ -52,7 +52,7 @@ from analysis.events import clean_events, signed_window
 from analysis.recovery import mean_response
 from experiments.provenance import git_info, describe
 from experiments.run import PARAMS
-from experiments.shock import N_AGENTS, parse_mix, describe_mix
+from experiments.common import N_AGENTS, parse_mix, describe_mix
 
 BEFORE = 200          # steps shown (and averaged for the "before" level) ahead of each jump
 TAIL = 200            # the "end" level is the mean of this many final steps

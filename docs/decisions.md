@@ -2,7 +2,7 @@
 
 Choices made in this project: what was chosen and why. Kept short on purpose.
 - What the paper itself defines is in `paper_model.md` (P numbers).
-- The tests and numbers behind each choice are in `validation.md`.
+- The tests and numbers behind each choice are in `validation/README.md`.
 - What is done and what comes next is in `project_plan.md`.
 
 **[Assumed]** = Paper unclear, so need to make own decision ·
@@ -114,7 +114,7 @@ The paper defines H (P14) but not how to estimate it. About 80 log-spaced lags a
 out per run, then averaged. Long lags (Δτ ≳ 10⁴) are noisy.
 
 **D13. Scale.** 10⁶ steps and 50 runs per N_A are the paper's (P13). The checks on the Fig. 2 run are
-in `validation.md`.
+in `validation/README.md`.
 
 **D14. Depth profile: last 10⁴ steps, lognormal fit by weighted regression. [Assumed, Checked]**
 The paper does not say which 10⁴ steps, or how the fit is made. The two sides are folded together
@@ -188,7 +188,7 @@ With every agent of the first type the model is exactly the baseline (D23). Eq. 
 hold, counted in units.
 
 **D28. Value traders: the first agents that react to the market. [Assumed, Checked]**
-Added because agents that ignore the market cannot make the price recover (`validation.md`,
+Added because agents that ignore the market cannot make the price recover (`validation/shock_tests.md`,
 sections 8 and 9).
 - All value traders estimate the asset's true value (D30).
 - Each trader's own value is the true value plus a fixed error (its shift). The error is + or − with
@@ -212,7 +212,7 @@ to anything. With no value traders the model is exactly the baseline (D23).
 - Why: the first version used a moving average of the price as the reference, so each trader's value
   followed the price. A trader that started bullish stayed bullish whatever the price did. When the
   shifts did not balance, the price ran away from its own average: a drift of 10–48 ticks per 1,000
-  steps, in the direction of the traders' middle shift (`validation.md`, section 12). A real value
+  steps, in the direction of the traders' middle shift (`validation/value_traders.md`, section 12). A real value
   investor does not change its valuation just because the price has moved.
 - The price now sits a fixed distance from the true value, about the traders' middle error, where
   buyers and sellers balance. It does not drift away.
@@ -238,7 +238,7 @@ Suggested by the finance supervisor as a main factor in flash crashes.
   split equally. Until the window has filled, and for a further W steps while the typical size is
   first measured, they buy or sell with equal chance.
 - **Window:** 10 steps was tried first. Over 10 steps the mid-price mostly bounces between bid and
-  ask, so the higher derivatives were nearly all noise (`validation.md`, section 15). 50 is the
+  ask, so the higher derivatives were nearly all noise (`validation/momentum_traders.md`, section 15). 50 is the
   default; the window is a setting to explore.
 
 With no momentum traders the model is exactly as before: runs with value traders, agent types and a
@@ -303,8 +303,8 @@ up and the price around it averaged (`experiments/news.py`, `analysis/events.py`
   apart but share one market, so if the market remembers that long the bands are too narrow. Not
   yet checked; the check is to save one average curve per run and compare the error from the spread
   between runs. Also, runs with the same seed have news at the same times, so studies that differ
-  only in jump size (`validation.md`, section 16) share their jump times and signs.
-- This assumes the response is proportional to the jump. Checked (`validation.md`, section 16):
+  only in jump size (`validation/news_and_poisson.md`, section 16) share their jump times and signs.
+- This assumes the response is proportional to the jump. Checked (`validation/news_and_poisson.md`, section 16):
   jumps of 10 and 30 ticks give the same curve, but jumps of 100 ticks, twice the value traders'
   mean error (D32), are taken in about half as fast. So results in units of the jump hold for news
   inside the spread only.
@@ -373,7 +373,7 @@ phase changes. `experiments/phase_sweep.py`.
   physics grows near a phase transition, and the transition gets sharper as the system gets bigger.
 - **Settings (the axes).** Value traders 0, 5, 10, 20, 40 and 60% of the takers; momentum traders 0,
   10, 20, 30, 40, 50, 60 and 80%; together at most 100% (44 points). Momentum traders are all
-  order 1, window 50, since order 1 drives trends and a mix adds little (`validation.md`, section
+  order 1, window 50, since order 1 drives trends and a mix adds little (`validation/news_and_poisson.md`, section
   16). Value traders as before (mean error 50 ticks, true value step 1).
 - **System size.** N_A = 125, 250, 500 and 1000 (176 combinations), to see whether the change gets
   sharper with size (finite-size scaling).

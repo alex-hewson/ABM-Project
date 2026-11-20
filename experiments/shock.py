@@ -2,7 +2,7 @@
 Shock test: inject one large market order into the baseline model and watch the book afterwards.
 
     python -m experiments.shock                                  # default: sizes 0, 50, 150, 300
-    python -m experiments.shock --sizes 0 100 400 --n-runs 400 --out results/shock_test.png
+    python -m experiments.shock --sizes 0 100 400 --n-runs 400 --out results/shock/shock_test.png
 
 Each run is the basic model (paper Fig. 2 parameters, symmetric order flow). It runs for --warmup
 steps so the book settles, then one market sell order of the given size is injected (run_simulation's
@@ -16,8 +16,8 @@ AgentType). Each item is K:COUNT, meaning COUNT agents that get a chance to act 
 place orders of K units. The counts must add up to 250. For example, a market of 4-step providers,
 and one with all three types:
 
-    python -m experiments.shock --provider-mix 4:250 --out results/shock_providers4.png
-    python -m experiments.shock --provider-mix 1:100 2:100 4:50 --out results/shock_mixed.png
+    python -m experiments.shock --provider-mix 4:250 --out results/shock/shock_providers4.png
+    python -m experiments.shock --provider-mix 1:100 2:100 4:50 --out results/shock/shock_mixed.png
 
 INTERVAL/SIZE:COUNT sets the two separately, e.g. 4/1:250 for unit orders every 4 steps. Without
 these options every agent is the paper's (1:250).
@@ -28,7 +28,7 @@ the asset's true value, which only moves with news (docs/decisions.md, D30). --t
 how much it moves each step, and --value-spread how far apart the traders' estimates are (mean error,
 in ticks):
 
-    python -m experiments.shock --value-traders 125 --out results/shock_value125.png
+    python -m experiments.shock --value-traders 125 --out results/shock/shock_value125.png
 
 --news-chance, --news-jump and --news-jump-spread add news, jumps in the true value at random times,
 as in experiments/run.py (docs/decisions.md, D32). They need value traders.
@@ -37,7 +37,7 @@ as in experiments/run.py (docs/decisions.md, D32). They need value traders.
 which follow the trend of the last --momentum-window mid-prices; --momentum-orders and
 --momentum-scale as in experiments/run.py. Value and momentum traders can be combined:
 
-    python -m experiments.shock --value-traders 50 --momentum-traders 50 --out results/shock_both.png
+    python -m experiments.shock --value-traders 50 --momentum-traders 50 --out results/shock/shock_both.png
 
 Recorded each step and averaged over runs:
     price    mid-price minus its value at the step before the shock
@@ -75,42 +75,11 @@ from abm.simulation import run_simulation, Shock
 from analysis.recovery import window, mean_response, pre_shock_level, impact, recovered_fraction, time_to_recover
 from experiments.provenance import git_info, describe
 from experiments.run import PARAMS
+from experiments.common import N_AGENTS, parse_mix, describe_mix   # N_AGENTS: the default N_A
 
-N_AGENTS = 250
 BEFORE = 200          # steps shown (and averaged for the "before" level) ahead of the shock
 TAIL = 200            # the "end" level is the mean of this many final steps
 QUANTITIES = ("price", "price_vs_value", "spread", "bid_volume", "ask_volume")
-
-
-def parse_mix(items):
-    """['1:100', '4:150'] -> {AgentType(1, 1): 100, AgentType(4, 4): 150}. K:COUNT gives agents that
-    act every K steps with orders of K units; INTERVAL/SIZE:COUNT sets the two separately.
-    None (option not given) stays None, which run_simulation reads as the paper's population."""
-    if items is None:
-        return None
-    mix = {}
-    for item in items:
-        try:
-            kind, count = item.split(":")
-            interval, size = kind.split("/") if "/" in kind else (kind, kind)
-            agent_type = AgentType(int(interval), int(size))
-            mix[agent_type] = mix.get(agent_type, 0) + int(count)
-        except ValueError as error:
-            raise ValueError(f"cannot read mix item {item!r}: expected K:COUNT or INTERVAL/SIZE:COUNT") from error
-    return mix
-
-
-def describe_mix(mix, n_agents=N_AGENTS):
-    """Short text for a mix, e.g. '100 x 1 unit every step, 150 x 4 units every 4 steps'.
-    n_agents is how many agents there are when no mix was given."""
-    if mix is None:
-        mix = {AgentType(): n_agents}
-    parts = []
-    for agent_type, count in mix.items():
-        units = "1 unit" if agent_type.size == 1 else f"{agent_type.size} units"
-        every = "every step" if agent_type.interval == 1 else f"every {agent_type.interval} steps"
-        parts.append(f"{count} x {units} {every}")
-    return ", ".join(parts)
 
 
 def run_one(task):
@@ -245,7 +214,7 @@ def main(argv=None):
     parser.add_argument("--momentum-scale", type=float, default=1.0,
                         help="signal, in units of its typical size, that makes them fairly sure (default 1)")
     parser.add_argument("--workers", type=int, default=None, help="processes to use (default: all cores)")
-    parser.add_argument("--out", type=Path, default=Path("results/shock_test.png"))
+    parser.add_argument("--out", type=Path, default=Path("results/shock/shock_test.png"))
     args = parser.parse_args(argv)
     if args.warmup < BEFORE or args.after < TAIL:
         parser.error(f"--warmup must be at least {BEFORE} and --after at least {TAIL}")

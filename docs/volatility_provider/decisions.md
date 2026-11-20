@@ -106,7 +106,7 @@ model that matches the stylised facts, with no crash needed.
   - **k, the length of one change:** the mid-price now minus the mid-price k steps ago. Changes over
     1 step are mostly the price bouncing between bid and ask (in trade time, consecutive trade-to-trade
     changes are correlated at −0.49), and a 10-step window was mostly noise for the momentum traders
-    (`validation.md`, section 15).
+    (`../validation/momentum_traders.md`, section 15).
   - **W, the providers' memory:** at each step the volatility is worked out from all the k-step changes
     in the last W steps (overlapping, so about W − k of them). A short memory reacts fast but is noisy:
     the relative error of a standard deviation from n independent changes is about 1/√(2n). A long

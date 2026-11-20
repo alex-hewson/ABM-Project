@@ -34,6 +34,7 @@ import numpy as np
 from abm.simulation import run_simulation
 from analysis.stylised import AUTOCORR, KURTOSIS_LAGS, LAGS, PRICE, TAIL_LEVELS, stylised_facts, summary_rows
 from experiments import run as runner
+from experiments.common import trade_segment
 from experiments.provenance import describe, git_info
 
 N_AGENTS = 500
@@ -60,26 +61,6 @@ def run_one(task):
                        n_momentum_traders=round(market.get("momentum", 0.0) * N_AGENTS), momentum_orders=(1,),
                        **runner.PARAMS)
     return trade_segment(r)
-
-
-def trade_segment(r, skip_steps: int = 1) -> dict:
-    """One run (run with record_sides=True and record_trades=True) as a segment for
-    analysis/stylised.py: per trade, the trade price, and the mid-price, spread and units at the best
-    prices at the end of the step before the trade's step. Trades in the first skip_steps steps are
-    left out (at least step 0, which has no step before it)."""
-    keep = r.trade_steps >= max(skip_steps, 1)
-    before = r.trade_steps[keep] - 1                       # the state at the end of the step before
-    bid, ask = r.best_bid_series, r.best_ask_series
-    mid = (bid + ask) / 2
-    mid = np.where(np.isfinite(mid), mid, np.nan)
-    filled = np.copy(mid)                                  # a step with one side empty keeps the last mid
-    for i in range(1, len(filled)):
-        if not np.isfinite(filled[i]):
-            filled[i] = filled[i - 1]
-    return {"trade": r.trade_prices[keep].astype(float), "mid": filled[before], "spread": (ask - bid)[before],
-            "bid_size": r.best_bid_size_series[before].astype(float),
-            "ask_size": r.best_ask_size_series[before].astype(float),
-            "size": np.ones(int(keep.sum()))}             # every order of these agents is one unit
 
 
 def model(names, n_runs: int, n_steps: int, workers, out_dir: Path) -> None:

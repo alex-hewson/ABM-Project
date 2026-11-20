@@ -17,11 +17,12 @@ order book data (E-mini S&P 500 futures).
   Next: a stable model that matches the stylised facts, adding one kind of agent at a time, starting
   with providers that react to recent volatility. See [docs/project_plan.md](docs/project_plan.md).
 
-Status and next steps are in [docs/project_plan.md](docs/project_plan.md). The reasoning behind
+Status and next steps are in [docs/project_plan.md](docs/project_plan.md), and what has been done in
+[docs/changelog.md](docs/changelog.md); [docs/README.md](docs/README.md) says which file is which. The reasoning behind
 each modelling and measurement choice is in [docs/decisions.md](docs/decisions.md), and from D38 on
 in a folder per part of the project (e.g. [docs/volatility_provider/](docs/volatility_provider/decisions.md)). What the paper
 itself defines is summarised in [docs/paper_model.md](docs/paper_model.md), and the checks and
-comparison with the paper are in [docs/validation.md](docs/validation.md).
+comparison with the paper are in [docs/validation/](docs/validation/README.md).
 
 ## Results
 
@@ -53,9 +54,9 @@ lines). The tail widths match the paper's Fig. 4b to within reading error: for e
 |---|---|
 | `abm/` | The model: `orderbook.py` (matching engine), `agents.py` (liquidity providers / takers, agent types with different speeds and order sizes, value traders, which react to the price, and momentum traders, which follow the trend), `buy_probability.py` (how the takers' buy probability changes over time, Figs. 3 and 4), `simulation.py` (step loop, runs agents through orderbook) |
 | `analysis/` | Measurements on one simulation's output: `prices.py` (price series), `hurst.py` (Hurst exponent), `returns.py` (return distributions), `depth_profile.py` (depth profile + lognormal fit), `recovery.py` (how far a shock moves the book and how much is undone), `autocorr.py` (autocorrelation of price changes and of their size, i.e. volatility clustering) |
-| `experiments/` | Reproducing the paper's figures: `run.py` (runs many simulations and saves the results), `plot.py` (draws Fig. 2, 3 or 4 from saved results, or compares several results files); `checkpoint.py` and `provenance.py` are support code these two use, not called directly. `shock.py` is the shock test: one large market order, then the book is watched as it refills |
+| `experiments/` | Reproducing the paper's figures: `run.py` (runs many simulations and saves the results), `plot.py` (draws Fig. 2, 3 or 4 from saved results, or compares several results files); `checkpoint.py` and `provenance.py` are support code these two use, not called directly; `common.py` holds helpers shared by several experiment scripts, so that none imports another for them. `shock.py` is the shock test: one large market order, then the book is watched as it refills. `evidence/` holds the scripts that draw the figures for progress summaries and meetings from saved results (`python experiments/evidence/make_figure.py`, and so on); the figures go to `results/evidence/` |
 | `tests/` | One test file per file above |
-| `docs/` | `project_plan.md` (status and next steps), `paper_model.md` (the model as the paper defines it), `decisions.md` (assumptions and choices made where the paper is unclear, to note in the thesis), `validation.md` (the tests and numbers behind them, and the comparison with the paper), `phase2_plan.md` (draft plan for the flash-crash work), `figures/` (the final plots shown above) |
+| `docs/` | `README.md` (which file is which), `project_plan.md` (aim, status and next steps), `changelog.md` (what has been done), `paper_model.md` (the model as the paper defines it), `decisions.md` (D1–D37: assumptions and choices made where the paper is unclear, to note in the thesis), `volatility_provider/` (decisions from D38 on, and the trial results), `validation/` (the checks and numbers behind the decisions, and the comparison with the paper, one file per part), `archive/` (superseded plans), `figures/` (the final plots shown above) |
 | `results/` | Generated data and plots (not tracked by git) |
 
 ## Pipeline of results
@@ -120,17 +121,17 @@ python -m experiments.plot fig2 --data results/fig2_trial.pkl --out results/fig2
 Fig. 3 needs both random-walk experiments:
 
 ```
-python -m experiments.run --flow bounded --out results/fig3_bounded.pkl
-python -m experiments.run --flow mean-reverting --out results/fig3_mean_reverting.pkl
-python -m experiments.plot fig3 --bounded results/fig3_bounded.pkl --mean-reverting results/fig3_mean_reverting.pkl --out results/fig3.png
+python -m experiments.run --flow bounded --out results/phase1/fig3_bounded.pkl
+python -m experiments.run --flow mean-reverting --out results/phase1/fig3_mean_reverting.pkl
+python -m experiments.plot fig3 --bounded results/phase1/fig3_bounded.pkl --mean-reverting results/phase1/fig3_mean_reverting.pkl --out results/fig3.png
 ```
 
 Fig. 4 needs one more experiment; `--compare` adds the Fig. 3 mean-reverting results (fixed entry
 depth) to the distribution panel as dashed lines:
 
 ```
-python -m experiments.run --flow mean-reverting --depth-coupling 10 --out results/fig4.pkl
-python -m experiments.plot fig4 --data results/fig4.pkl --compare results/fig3_mean_reverting.pkl --out results/fig4.png
+python -m experiments.run --flow mean-reverting --depth-coupling 10 --out results/phase1/fig4.pkl
+python -m experiments.plot fig4 --data results/phase1/fig4.pkl --compare results/phase1/fig3_mean_reverting.pkl --out results/phase1/fig4.png
 ```
 
 The paper does not say which "price" it uses, so each run stores results for five definitions
@@ -168,7 +169,7 @@ that gets a chance every K steps and places orders of K units, and the agents ar
 the types listed. For example, every taker placing 4-unit orders every 4 steps:
 
 ```
-python -m experiments.run --n-steps 100000 --n-runs 8 --agent-counts 500 --taker-types 4 --out results/types_takers4.pkl
+python -m experiments.run --n-steps 100000 --n-runs 8 --agent-counts 500 --taker-types 4 --out results/agent_types/types_takers4.pkl
 ```
 
 ### Shock test
@@ -178,7 +179,7 @@ price, the spread and the number of orders on each side afterwards, averaged ove
 is the control with no shock. It takes about 15 minutes on a 4-core laptop at these settings:
 
 ```
-python -m experiments.shock --sizes 0 50 150 300 --n-runs 400 --out results/shock_test.png
+python -m experiments.shock --sizes 0 50 150 300 --n-runs 400 --out results/shock/shock_test.png
 ```
 
 `--buy` injects a buy order instead. A summary table is printed, and the averaged curves are saved
@@ -189,8 +190,8 @@ next to the figure as a `.pkl` file.
 every type trades the same volume on average. The counts must add up to 250:
 
 ```
-python -m experiments.shock --provider-mix 4:250 --out results/shock_providers4.png
-python -m experiments.shock --provider-mix 1:100 2:100 4:50 --out results/shock_mixed.png
+python -m experiments.shock --provider-mix 4:250 --out results/shock/shock_providers4.png
+python -m experiments.shock --provider-mix 1:100 2:100 4:50 --out results/shock/shock_mixed.png
 ```
 
 `--momentum-traders N` turns N of the takers into momentum traders, which follow the trend of the last
@@ -204,7 +205,7 @@ above. The true value moves by a small random step every step. With value trader
 after a shock:
 
 ```
-python -m experiments.shock --value-traders 125 --out results/shock_value125.png
+python -m experiments.shock --value-traders 125 --out results/shock/shock_value125.png
 ```
 
 `--news-chance P` adds news: each step there is a chance P that the true value jumps, by a random size
@@ -376,8 +377,12 @@ just the ones the job was given.
 
 ## Requirements
 
-Python 3.12+ (the fast simulation method uses `random.binomialvariate`) with `numpy`, `matplotlib`
-and `pytest`.
+Python 3.12+ (the fast simulation method uses `random.binomialvariate`) with `numpy`, `matplotlib`,
+`pandas` (for the E-mini data scripts only) and `pytest`, listed in `requirements.txt`:
+
+```
+pip install -r requirements.txt
+```
 
 Note for PowerShell: do not pipe the runner's output through `Select-Object -First N`. That closes
 the output after N lines, which stops the runner at its next progress message.

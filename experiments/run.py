@@ -53,9 +53,9 @@ the moment it finishes (see checkpoint.py), so an interrupted experiment can be 
 Usage (paper scale is the default: 10^6 steps, 50 runs per N_A; expect hours per flow):
     python -m experiments.run --n-steps 100000 --n-runs 4        # quick check (symmetric)
     python -m experiments.run --out results/fig2.pkl             # Fig. 2 data
-    python -m experiments.run --flow bounded --out results/fig3_bounded.pkl
-    python -m experiments.run --flow mean-reverting --out results/fig3_mean_reverting.pkl
-    python -m experiments.run --flow mean-reverting --depth-coupling 10 --out results/fig4.pkl
+    python -m experiments.run --flow bounded --out results/phase1/fig3_bounded.pkl
+    python -m experiments.run --flow mean-reverting --out results/phase1/fig3_mean_reverting.pkl
+    python -m experiments.run --flow mean-reverting --depth-coupling 10 --out results/phase1/fig4.pkl
     python -m experiments.run --value-fraction 0.2 --out results/value20.pkl     # 20% value traders
     ... add --resume to continue after an interruption
 """

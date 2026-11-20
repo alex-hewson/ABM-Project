@@ -88,7 +88,7 @@ main simulation. C_λ = 0 gives the fixed depth again.
 
 ## 7. What the paper reports
 
-The comparison with the results here is in `validation.md`.
+The comparison with the results here is in `validation/README.md`.
 
 - **Fig. 2 (basic model).** H is below 1/2 at short time scales (anti-persistent). It rises to 1/2
   and stays there for medium and long time scales. The depth profile is roughly lognormal.

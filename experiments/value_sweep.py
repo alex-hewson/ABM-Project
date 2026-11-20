@@ -1,6 +1,6 @@
 """
 Value trader sweep: which settings let the price recover after a shock without pinning it down in
-normal times? (docs/validation.md, sections 10 and 11.)
+normal times? (docs/validation/shock_tests.md, section 10, and value_traders.md, section 11.)
 
 Every combination of three settings is tried (docs/decisions.md, D28):
 
@@ -41,7 +41,7 @@ import numpy as np
 from analysis.recovery import time_to_recover, recovered_fraction
 from experiments import run as runner
 from experiments import shock
-from experiments.plot import approximate_kurtosis, hurst_curves, hurst_near, mean_autocorrelation
+from experiments.common import approximate_kurtosis, hurst_curves, hurst_near, mean_stored_autocorrelation
 
 FRACTIONS = (0.02, 0.05, 0.1, 0.2)
 NEWS = (0.25, 0.5, 1.0, 2.0)
@@ -110,7 +110,7 @@ def summarise_index(index: int, out_dir: Path):
         row[f"H({lag:g})"] = hurst_near(taus, h_mean, lag)
     row["kurtosis_800"] = approximate_kurtosis(runs, config["return_bin_edges"]["median"], "median", 800)
     for kind in ("signed", "absolute"):
-        values = mean_autocorrelation(runs, NORMAL_AGENTS, "median", kind)
+        values = mean_stored_autocorrelation(runs, NORMAL_AGENTS, "median", kind)
         row[f"autocorr_{kind}"] = None if values is None else float(values[0])
     return row
 

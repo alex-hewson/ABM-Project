@@ -44,7 +44,7 @@ from analysis.events import clean_events, signed_window
 from analysis.recovery import mean_response, recovered_fraction, time_to_recover
 from experiments.provenance import git_info, describe
 from experiments.run import PARAMS
-from experiments.shock import N_AGENTS, parse_mix, describe_mix     # N_AGENTS: the default N_A
+from experiments.common import N_AGENTS, parse_mix, describe_mix     # N_AGENTS: the default N_A
 
 BEFORE = 200          # steps shown (and averaged for the "before" level) ahead of each order
 TAIL = 200            # the "end" level is the mean of this many final steps

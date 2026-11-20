@@ -44,7 +44,7 @@ import numpy as np
 from analysis.recovery import impact, recovered_fraction, time_to_recover
 from experiments import run as runner
 from experiments import shock
-from experiments.plot import approximate_kurtosis, hurst_curves, hurst_near, mean_autocorrelation
+from experiments.common import approximate_kurtosis, hurst_curves, hurst_near, mean_stored_autocorrelation
 
 SHARES = (0.1, 0.25, 0.5)
 MIXES = ((1,), (2,), (3,), (1, 2, 3), (1, 1, 2), (2, 2, 1), (1, 1, 3), (3, 3, 1), (2, 2, 3), (3, 3, 2))
@@ -152,7 +152,7 @@ def summarise_index(index: int, out_dir: Path):
     for tau in (200, 800):
         row[f"kurtosis_{tau}"] = approximate_kurtosis(runs, edges, "median", tau)
     for kind in ("signed", "absolute"):
-        values = mean_autocorrelation(runs, NORMAL_AGENTS, "median", kind)
+        values = mean_stored_autocorrelation(runs, NORMAL_AGENTS, "median", kind)
         row[f"autocorr_{kind}"] = None if values is None else float(values[0])
     return row
 

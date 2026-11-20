@@ -1,5 +1,7 @@
 # Phase 2 Plan (draft)
 
+*Archived on 20 November 2026: kept as a record of the plan at the time. The current plan is in `../project_plan.md`, and what was done is in `../changelog.md`.*
+
 Rough plan for the rest of the project. To discuss with supervisors.
 
 **Update, 17 November 2026:** the project aim is now a model that is normal almost all the time but

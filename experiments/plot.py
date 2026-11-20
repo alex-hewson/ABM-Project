@@ -2,10 +2,10 @@
 Draw the paper's figures from results files saved by experiments/run.py.
 
     python -m experiments.plot fig2 --data results/fig2.pkl --out results/fig2.png
-    python -m experiments.plot fig3 --bounded results/fig3_bounded.pkl \
-                                    --mean-reverting results/fig3_mean_reverting.pkl --out results/fig3.png
-    python -m experiments.plot fig4 --data results/fig4.pkl --out results/fig4.png \
-                                    [--compare results/fig3_mean_reverting.pkl]
+    python -m experiments.plot fig3 --bounded results/phase1/fig3_bounded.pkl \
+                                    --mean-reverting results/phase1/fig3_mean_reverting.pkl --out results/fig3.png
+    python -m experiments.plot fig4 --data results/phase1/fig4.pkl --out results/phase1/fig4.png \
+                                    [--compare results/phase1/fig3_mean_reverting.pkl]
     python -m experiments.plot compare --data results/a.pkl results/b.pkl --labels "none" "20%" \
                                        --out results/compare.png
 
@@ -52,6 +52,7 @@ from analysis.prices import PRICE_DEFINITIONS
 from analysis.returns import counts_to_density
 from experiments.run import RESULTS_DIR, RESULTS_FORMAT, AGENT_COUNTS, PATH_AGENTS, DEPTH_AGENTS, RETURN_TAUS
 from experiments.provenance import describe
+from experiments.common import approximate_kurtosis, hurst_curves, hurst_near, mean_stored_autocorrelation
 
 
 def load(path: Path, expected_flow: str, eq4: bool = False) -> dict:
@@ -89,16 +90,6 @@ def add_footer(fig, configs):
     if versions:
         fig.text(0.995, 0.005, "code version: " + "; ".join(versions), ha="right", va="bottom",
                  fontsize=7, color="gray")
-
-
-def hurst_curves(runs, n_agents, price):
-    """(lags, H per run) for one N_A: H derived per run from the stored RMS values, so the average
-    over runs is an average of H (as in the paper), not an H of averaged RMS."""
-    rs = [r for r in runs if r["n_agents"] == n_agents]
-    if not rs:
-        return None, None
-    taus = rs[0]["taus"]
-    return taus, np.array([local_slopes(taus, r["rms"][price]) for r in rs])
 
 
 def plot_price_path(ax, runs, title):
@@ -300,15 +291,6 @@ def plot_returns_semilog(ax, runs, bin_edges_by_price, price, title, compare=Non
     ax.legend(fontsize=6, ncol=2 if compare is not None else 1)
 
 
-def approximate_kurtosis(runs, bin_edges, price, tau, n_agents=DEPTH_AGENTS):
-    """Kurtosis of the signed increments (3 for a Gaussian), from the binned |Delta p| counts, for the
-    runs at n_agents (500 by default). Only approximate, since every increment is placed at its bin centre."""
-    counts = sum(r["return_counts"][price][tau] for r in runs if r["n_agents"] == n_agents).astype(float)
-    centres = np.sqrt(bin_edges[:-1] * bin_edges[1:])
-    p = counts / counts.sum()
-    return (p * centres ** 4).sum() / (p * centres ** 2).sum() ** 2
-
-
 def figure4(args):
     data = load(args.data, "mean-reverting", eq4=True)
     runs, config = data["runs"], data["config"]
@@ -378,21 +360,6 @@ def describe_settings(config: dict) -> str:
     return text
 
 
-def mean_autocorrelation(runs, n_agents, price, kind):
-    """Mean over runs of the stored autocorrelation ("signed" or "absolute") at one N_A, or None if
-    the file has none (it was made before they were stored)."""
-    rows = [r["autocorr"][price][kind] for r in runs
-            if r["n_agents"] == n_agents and price in (r.get("autocorr") or {})]
-    return np.nanmean(rows, axis=0) if rows else None
-
-
-def hurst_near(taus, h_mean, target):
-    """H at the stored lag closest to target (None if the lags do not reach that far)."""
-    if target > taus[-1] * 1.5:
-        return None
-    return float(h_mean[int(np.argmin(np.abs(np.log(taus) - np.log(target))))])
-
-
 def figure_compare(args):
     datasets = [load_any(path) for path in args.data]
     labels = args.labels or [describe_settings(d["config"]) for d in datasets]
@@ -431,7 +398,7 @@ def figure_compare(args):
 
         interval = (config.get("autocorr") or {}).get("interval")
         for ax, kind in ((ax_signed, "signed"), (ax_abs, "absolute")):
-            values = mean_autocorrelation(runs, n_agents, price, kind)
+            values = mean_stored_autocorrelation(runs, n_agents, price, kind)
             row[kind] = None if values is None else float(values[0])
             if values is not None:
                 ax.plot(np.arange(1, len(values) + 1) * interval, values, color=c, lw=0.9, label=label)

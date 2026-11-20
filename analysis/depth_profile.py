@@ -7,7 +7,7 @@ so (mu, sigma) can be read off a quadratic regression of ln(N(x)) + ln(x) agains
 numpy can do directly (no iteration). An earlier method-of-moments version (matching the
 weighted mean/variance of the profile) put the fitted peak 25-50% further out than the data's
 actual peak, because moments are dominated by the far tail; this regression is weighted to follow
-the bulk of the distribution instead -- see docs/decisions.md, D14, and docs/validation.md,
+the bulk of the distribution instead -- see docs/decisions.md, D14, and docs/validation/phase1_reproduction.md,
 section 3, for the comparison.
 """
 

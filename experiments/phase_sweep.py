@@ -48,7 +48,7 @@ import numpy as np
 
 from experiments import pressure
 from experiments import run as runner
-from experiments.plot import approximate_kurtosis, hurst_curves, hurst_near, mean_autocorrelation
+from experiments.common import approximate_kurtosis, hurst_curves, hurst_near, mean_stored_autocorrelation
 
 SIZES = (1000, 500, 250, 125)                          # N_A, largest first
 VALUE_SHARES = (0.0, 0.05, 0.1, 0.2, 0.4, 0.6)
@@ -129,7 +129,7 @@ def summarise_index(index: int, out_dir: Path):
     row["kurtosis_200"] = approximate_kurtosis(runs, edges, "median", 200, n)
     curves = {}
     for kind in ("signed", "absolute"):
-        values = mean_autocorrelation(runs, n, "median", kind)
+        values = mean_stored_autocorrelation(runs, n, "median", kind)
         curves[kind] = values
         row[f"autocorr_{kind}"] = None if values is None else float(values[0])
     row["mid_gaps"] = int(sum(r.get("mid_gaps", 0) for r in runs))

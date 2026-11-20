@@ -47,7 +47,7 @@ from abm.simulation import run_simulation
 from abm.volatility_provider import VolatilitySettings
 from analysis.stylised import KURTOSIS_LAGS, LAGS, PRICE, stylised_facts
 from experiments import run as runner
-from experiments.emini_compare import trade_segment
+from experiments.common import trade_segment
 from experiments.provenance import describe, git_info
 
 N_AGENTS = 500
