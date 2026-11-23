@@ -322,3 +322,78 @@ model that matches the stylised facts, with no crash needed.
   the four) × 6 values of λ₀ = 30 jobs. Each is the same as in the first trial: mean-reverting
   takers, N_A = 500, 4 runs of 120,000 steps, the first 20,000 left out. `collect` sets the first
   trial's λ₀ = 100 results beside them.
+- **Trial results (23 November 2026).** All 30 jobs finished (`results/lambda_sweep/summary.csv` and
+  `summary.png`; the first trial's λ₀ = 100 results alongside). All on the mid-price, in trade time.
+  - **No setup passes all three tests at any λ₀.**
+  - **Fixed-depth control:**
+
+    | λ₀ | κ₁₀₀ / κ₁₀₀₀ | H₁₀₀₀ | ρ₁₀₀ | mid moves | spread | spread at 1 tick | queue | (a) |
+    |---|---|---|---|---|---|---|---|---|
+    | 100 | 2.94 / 2.60 | 0.37 | −0.32 | 7.08% | 24.36 | 0% | 2 | pass |
+    | 30 | 2.95 / 2.60 | 0.37 | −0.32 | 5.83% | 7.29 | 0% | 4 | pass |
+    | 10 | 3.03 / 2.65 | 0.35 | −0.33 | 3.63% | 2.36 | 11% | 15 | pass |
+    | 8 | 3.14 / 2.65 | 0.33 | −0.34 | 3.05% | 1.85 | 28% | 20 | pass |
+    | 7 | 3.06 / 2.70 | 0.32 | −0.36 | 2.68% | 1.59 | 44% | 26 | pass |
+    | 6 | 3.01 / 2.80 | 0.27 | −0.34 | 1.99% | 1.34 | 67% | 33 | pass |
+    | 5 | 8.61 / 2.48 | 0.32 | −0.19 | 0.54% | 1.07 | 93% | 29 | fail |
+    | E-mini | 3.5 / 2.9 | 0.51 | −0.01 | 2.35% | 1.02 | 99% | 173 | |
+
+    ρ₁₀₀ is the autocorrelation of consecutive 100-trade changes; "mid moves" is the share of trades
+    that change the mid-price; "queue" is the median number of units at the best price.
+  - **Setup 84 (outward only, W = 50, L = 20,000):**
+
+    | λ₀ | κ₁₀₀ / κ₁₀₀₀ | H₁₀₀₀ | ρ₁₀₀ | mid moves | spread | spread at 1 tick | queue | (a) |
+    |---|---|---|---|---|---|---|---|---|
+    | 100 | 3.17 / 2.82 | 0.39 | −0.32 | 7.13% | 26.46 | 0% | 2 | pass |
+    | 30 | 3.14 / 2.82 | 0.39 | −0.33 | 5.94% | 7.91 | 0% | 4 | pass |
+    | 10 | 3.11 / 2.82 | 0.37 | −0.34 | 3.81% | 2.57 | 9% | 13 | pass |
+    | 8 | 3.13 / 2.81 | 0.35 | −0.35 | 3.23% | 2.01 | 22% | 18 | pass |
+    | 7 | 3.17 / 2.84 | 0.34 | −0.35 | 2.88% | 1.74 | 36% | 23 | pass |
+    | 6 | 2.97 / 2.93 | 0.29 | −0.37 | 2.30% | 1.44 | 57% | 30 | pass |
+    | 5 | 4.36 / 3.10 | 0.32 | −0.34 | 1.53% | 1.30 | 72% | 28 | pass |
+
+    It is the only volatility provider setup that works at every λ₀. At λ₀ = 6–10 it is close to the
+    control at the same λ₀. At λ₀ = 5 it keeps (a) where the control loses it (κ₁₀ 8.3, E-mini 8.6),
+    and its price moves on 1.53% of trades against the control's 0.54%; part of this is that its mean
+    depth is 5.9, not 5.
+  - **The "both ways" setups freeze in narrow books.** Setup 105 at λ₀ ≤ 8, setup 21 at λ₀ ≤ 10 and
+    setup 35 at λ₀ ≤ 8: the mean depth falls to the 1-tick floor and stays there, every order sits at
+    the best price (queue 674), and the price stops moving (0% of trades from λ₀ = 7 down for all
+    three). Once the price has stopped, recent volatility is zero, so the depth stays at the floor:
+    the narrowing loop of D39 becomes permanent. The "both ways" form is therefore not usable in a
+    narrow book.
+  - **A narrower spread does not fix (b) or (c).** From λ₀ = 100 to 6 the spread falls from about 25
+    ticks to about 1.4, but ρ₁₀₀ stays at −0.32 to −0.37 in every stable run, and H₁₀₀₀ falls from
+    0.37–0.39 to 0.27–0.35, further from the E-mini's 0.51. The width of the spread is therefore not
+    the main reason for failing (b) and (c) (D39 had left this open).
+  - **The E-mini's regime is not reached.** At λ₀ = 5–8 the price moves on 1.5–3.2% of trades
+    (E-mini 2.35%) and the spread is 1.1–2.0 ticks, but the queue at the best price is 18–33 units
+    against 173, and the spread is at one tick only 22–93% of the time. The values of λ₀ that give
+    E-mini-sized queues (3 and below) freeze the price (see the check above).
+- **Check: more agents (23 November 2026).** Fixed-depth providers, one run of 15,000 steps each, the
+  first 3,000 left out:
+
+  | λ₀ | N_A | queue | trade ÷ queue | mid moves | spread at 1 tick |
+  |---|---|---|---|---|---|
+  | 7 | 500 | 27 | 0.037 | 2.70% | 43% |
+  | 7 | 1,000 | 55 | 0.018 | 1.32% | 34% |
+  | 7 | 2,000 | 117 | 0.009 | 0.56% | 25% |
+  | 10 | 500 | 14 | 0.071 | 3.67% | 10% |
+  | 10 | 1,000 | 31 | 0.032 | 1.70% | 5% |
+  | 10 | 2,000 | 62 | 0.016 | 0.81% | 2% |
+
+  The queue grows in proportion to N_A, and at N_A = 2,000, λ₀ = 7 trade ÷ queue matches the
+  E-mini's 0.012 while the price still moves. But the takers' orders, and the imbalance from q(t)
+  that pushes the price through a queue, grow in proportion to N_A as well, so the number of price
+  moves per step stays about the same (about 3,300–4,100 per run at λ₀ = 7) and the share per trade
+  falls as 1/N_A. The spread does not narrow towards one tick. Phase 1 also found the short-lag
+  anti-correlation slightly stronger with more agents (H at Δτ = 100 of 0.23, 0.21 and 0.19 for
+  N_A = 125, 250 and 500; D11). Larger orders would not help either: scaling limit and market orders
+  together only changes the units; larger limit orders alone act like more providers; larger market
+  orders alone empty queues faster but raise trade ÷ queue, away from 0.012.
+- **What the E-mini implies.** Its queue at the best price is about 80 median trades, yet the price
+  moves about every 40 trades. Trades of median size cannot empty a queue that fast even if all of
+  them hit the same side, so real queues must mostly shrink in another way: cancellations, or
+  occasional trades far larger than the median. In the model every order is cancelled at the same
+  rate (δ = 0.025 per step) wherever it sits. How queues at the best price empty: **[Open]**.
+- **Open after the trial:** whether to keep setup 84, and at which λ₀: **[Open]**.
