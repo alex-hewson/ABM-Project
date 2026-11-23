@@ -63,6 +63,7 @@ def test_trades_get_the_last_quote_before_them_and_the_session_is_kept():
     check("each trade has the last quote before it",
           s["mid"][0] == (6500 + 6500.25) / 2 / 0.25 and s["mid"][2] == (6500.25 + 6500.75) / 2 / 0.25
           and list(s["spread"]) == [1, 1, 2] and list(s["bid_size"]) == [40, 40, 10])
+    check("each trade keeps its timestamp, in time order", len(s["time"]) == 3 and all(s["time"][1:] >= s["time"][:-1]))
     check("trades outside the hours chosen are left out", len(only_first[0]["trade"]) == 2)
     check("the Correction row and the other day are not used", len(segments) == 1)
     check("statistics saved, without the series", saved and facts["n_trades"] == 3 and "trade" not in facts["source"])

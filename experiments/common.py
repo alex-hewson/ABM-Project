@@ -58,7 +58,8 @@ def describe_mix(mix, n_agents=N_AGENTS):
 def trade_segment(r, skip_steps: int = 1) -> dict:
     """One run (run with record_sides=True and record_trades=True) as a segment for
     analysis/stylised.py: per trade, the trade price, and the mid-price, spread and units at the best
-    prices at the end of the step before the trade's step. Trades in the first skip_steps steps are
+    prices at the end of the step before the trade's step, and the mid-price just before each trade
+    (sign_mid). Trades in the first skip_steps steps are
     left out (at least step 0, which has no step before it)."""
     keep = r.trade_steps >= max(skip_steps, 1)
     before = r.trade_steps[keep] - 1                       # the state at the end of the step before
@@ -69,10 +70,15 @@ def trade_segment(r, skip_steps: int = 1) -> dict:
     for i in range(1, len(filled)):
         if not np.isfinite(filled[i]):
             filled[i] = filled[i - 1]
-    return {"trade": r.trade_prices[keep].astype(float), "mid": filled[before], "spread": (ask - bid)[before],
+    out = {"trade": r.trade_prices[keep].astype(float), "mid": filled[before], "spread": (ask - bid)[before],
             "bid_size": r.best_bid_size_series[before].astype(float),
             "ask_size": r.best_ask_size_series[before].astype(float),
-            "size": np.ones(int(keep.sum()))}             # every order of these agents is one unit
+           "size": np.ones(int(keep.sum()))}              # every order of these agents is one unit
+    if len(r.trade_mids) == len(r.trade_steps):
+        # The mid-price just before each trade, for telling buys from sells (D41). The end-of-step mid
+        # above is up to a step old, so trades in the same step would all be judged against it.
+        out["sign_mid"] = r.trade_mids[keep]
+    return out
 
 
 def hurst_curves(runs, n_agents, price):

@@ -5,7 +5,8 @@ Run with: python -m tests.test_stylised   (from the project root)
 
 import numpy as np
 
-from analysis.stylised import LAGS, KURTOSIS_LAGS, stylised_facts, changes
+from analysis.stylised import (LAGS, KURTOSIS_LAGS, SIGN_LAGS, changes, order_signs, power_law_exponent, sign_autocorrelation,
+                               stylised_facts, trade_signs)
 
 
 def check(label, condition):
@@ -53,6 +54,63 @@ def test_changes_never_cross_from_one_segment_to_the_next():
     check("segments too short for a lag are skipped", len(changes([a, b], "trade", 5)) == 0)
     short = stylised_facts([a, b])
     check("short segments give NaN, not an error", np.isnan(short["trade"]["kurtosis"][KURTOSIS_LAGS[-1]]))
+
+
+def signed_segment(signs, mid=100.0):
+    """Trades at the ask (mid + 0.5) for +1, the bid for -1, the mid itself for 0."""
+    signs = np.asarray(signs, dtype=float)
+    n = len(signs)
+    return {"trade": mid + 0.5 * signs, "mid": np.full(n, mid), "spread": np.ones(n),
+            "bid_size": np.ones(n), "ask_size": np.ones(n)}
+
+
+def test_trade_signs():
+    check("buy above the mid, sell below, 0 at the mid", list(trade_signs(signed_segment([1, -1, 0]))) == [1, -1, 0])
+    rng = np.random.default_rng(3)
+    coin = signed_segment(rng.choice([-1, 1], 300_000))
+    ac = sign_autocorrelation([coin])
+    check(f"independent signs: no autocorrelation (largest {np.max(np.abs(ac[1:])):.3f})", np.all(np.abs(ac[1:]) < 0.01))
+    check("lag 0 would be 1 by construction; the first lag listed is 1", SIGN_LAGS[0] == 1)
+    # Markov signs: keep the last sign with probability p, so the autocorrelation is (2p - 1)^lag.
+    p, n = 0.8, 300_000
+    flips = rng.random(n) > p
+    s = np.where(np.cumsum(flips) % 2 == 0, 1, -1)
+    ac = sign_autocorrelation([signed_segment(s)])
+    lags = list(SIGN_LAGS)
+    for lag in (1, 3, 10):
+        check(f"persistent signs: autocorrelation at lag {lag} close to 0.6^{lag} = {0.6 ** lag:.3f} ({ac[lags.index(lag)]:.3f})",
+              abs(ac[lags.index(lag)] - 0.6 ** lag) < 0.01)
+    # Each segment is a long run of one sign, the opposite of the next: pooled as one series the signs
+    # would be strongly correlated, but within each segment there is no variation at all.
+    blocks = [signed_segment(np.where(rng.random(20_000) < 0.5, 1, -1) * 0 + sign) for sign in (1, -1, 1)]
+    check("pairs never cross from one segment to the next (no variation inside any segment: no answer)",
+          np.isnan(sign_autocorrelation(blocks)).all())
+    check("segments shorter than the longest lag are left out",
+          np.isnan(sign_autocorrelation([signed_segment(rng.choice([-1, 1], 5_000))])).all())
+    exact = 0.5 * SIGN_LAGS.astype(float) ** -0.6
+    check(f"the power-law exponent of lag^-0.6 is 0.6 ({power_law_exponent(SIGN_LAGS, exact):.3f})",
+          abs(power_law_exponent(SIGN_LAGS, exact) - 0.6) < 1e-9)
+    facts = stylised_facts([coin])
+    check("stylised_facts keeps the sign statistics", "signs" in facts and abs(facts["signs"]["share_buy"] - 0.5) < 0.01)
+    check("without timestamps (the model) there is no merged version", "orders" not in facts["signs"])
+
+
+def test_fills_of_one_order_are_merged():
+    seg = signed_segment([1, 1, 1, -1, -1, 1])
+    seg["time"] = np.array([0, 0, 1, 1, 2, 2])
+    # time 0: two buys (one order); time 1: a buy and a sell (two orders); time 2: a sell and a buy.
+    check("same time and same side counted once", list(order_signs(seg)) == [1, 1, -1, -1, 1])
+    check("a segment without timestamps is unchanged", list(order_signs(signed_segment([1, 1, -1]))) == [1, 1, -1])
+    rng = np.random.default_rng(4)
+    orders = rng.choice([-1, 1], 100_000)
+    fills = np.repeat(orders, 3)                       # every order fills three resting orders
+    seg = signed_segment(fills)
+    seg["time"] = np.repeat(np.arange(len(orders)), 3)
+    ac_fills, ac_orders = sign_autocorrelation([seg]), sign_autocorrelation([seg], signs=order_signs)
+    check(f"three fills per order look persistent fill by fill ({ac_fills[0]:.2f} at lag 1)", ac_fills[0] > 0.6)
+    check(f"but the orders themselves are independent ({ac_orders[0]:+.3f})", abs(ac_orders[0]) < 0.01)
+    facts = stylised_facts([seg])
+    check("stylised_facts reports fills per order", abs(facts["signs"]["orders"]["fills_per_order"] - 3) < 1e-9)
 
 
 if __name__ == "__main__":

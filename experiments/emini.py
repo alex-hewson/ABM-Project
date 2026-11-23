@@ -260,7 +260,8 @@ def trade_segments(path: Path, days=DAYS, session=SESSION, max_rows: int | None 
             "mid": (q["Bid Price"] + q["Ask Price"]).to_numpy() / 2 / TICK,
             "spread": (q["Ask Price"] - q["Bid Price"]).to_numpy() / TICK,
             "bid_size": q["Bid Size"].to_numpy(), "ask_size": q["Ask Size"].to_numpy(),
-            "size": rows["Volume"].to_numpy()})
+            "size": rows["Volume"].to_numpy(),
+            "time": times[keep].astype("int64").to_numpy()})         # nanoseconds; merges fills of one order
         for d, group in frame.groupby("day"):
             parts[d].append(group)
     segments = []
@@ -270,6 +271,7 @@ def trade_segments(path: Path, days=DAYS, session=SESSION, max_rows: int | None 
             continue
         frame = pd.concat(parts[d])
         segment = {name: frame[name].to_numpy(dtype=float) for name in ("trade", "mid", "spread", "bid_size", "ask_size", "size")}
+        segment["time"] = frame["time"].to_numpy()
         segment["mid"] = pd.Series(segment["mid"]).ffill().bfill().to_numpy()    # before the session's first quote
         segments.append(segment)
         print(f"{d}: {len(frame):,} trades")

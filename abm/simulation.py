@@ -109,6 +109,9 @@ class SimulationResult:
     # and its price. A trade is one fill between two orders, as in the order book.
     trade_steps: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=int))
     trade_prices: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=int))
+    # The mid-price in the book just before each of those trades (NaN if one side was empty), as the
+    # last quote before a trade in real data. Used to tell buys from sells (D41).
+    trade_mids: np.ndarray = field(default_factory=lambda: np.empty(0))
     # How many units of the shock found nothing left to trade against (0 if there was no shock).
     shock_unfilled: int = 0
     # Value traders (filled only if run_simulation had n_value_traders above 0): the asset's true value
@@ -284,7 +287,8 @@ def run_simulation(
     It uses no random numbers, so it does not change the run.
 
     record_trades=True stores the step and price of every trade after the pre-opening, in order
-    (result.trade_steps, result.trade_prices), for statistics in trade time. It does not change the run.
+    (result.trade_steps, result.trade_prices), and the mid-price just before each (result.trade_mids),
+    for statistics in trade time. It does not change the run.
 
     provider_mix and taker_mix give agents different speeds and order sizes (see AgentType). Each is
     {agent type: number of agents} and must add up to n_agents, e.g.
@@ -381,6 +385,7 @@ def run_simulation(
     step_trade_prices: List[int] = []     # prices of the trades in the current step
     all_trade_steps: List[int] = []       # with record_trades: the step and price of every trade
     all_trade_prices: List[int] = []
+    all_trade_mids: List[float] = []      # with record_trades: the mid-price just before every trade
     now = [-1]                            # the step being run; -1 in the pre-opening, whose trades are not kept
 
     def on_trade(price: int) -> None:
@@ -389,6 +394,10 @@ def run_simulation(
         if record_trades and now[0] >= 0:
             all_trade_steps.append(now[0])
             all_trade_prices.append(price)
+            # The book calls this before it removes the filled order, so the book is still as it was
+            # just before the trade.
+            mid = book.mid_price()
+            all_trade_mids.append(float("nan") if mid is None else float(mid))
 
     book = OrderBook(keep_trades=keep_trades,
                      on_trade=on_trade if (record_trade_prices or record_trades) else None)
@@ -654,6 +663,7 @@ def run_simulation(
         best_ask_size_series=best_ask_size_series,
         trade_steps=np.array(all_trade_steps, dtype=int),
         trade_prices=np.array(all_trade_prices, dtype=int),
+        trade_mids=np.array(all_trade_mids, dtype=float),
         shock_unfilled=shock_unfilled,
         true_value_series=true_value_series,
         news_steps=np.array(news_steps, dtype=int),
