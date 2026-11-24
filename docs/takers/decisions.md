@@ -193,3 +193,55 @@ stays unique.
     is exactly as before (tested).
   - With N = 1, f = 1 and α = 1.6 the lag-1 sign correlation in a full run is about 0.56, and with
     f = 0.5 about a quarter of that, as estimated above (tests).
+- **Trial results (24 November 2026).** All 210 jobs finished (`results/splitting_sweep/summary.csv`,
+  `signs.png`, `hurst.png`). All on the mid-price, in trade time; signs per order (D41).
+  - **No combination passes all three D38 tests.** (a) passes in all 210, (b) in 72 and (c) in 6, but
+    none passes both (b) and (c).
+  - **Splitting is the first change that moves (b) and (c).** Without it (fixed depth, D40) H at
+    1,000 trades is 0.37 and the autocorrelation of 100-trade changes −0.32. With it:
+
+    | α | H at 1,000 trades | ρ₁₀₀ | passes (b) |
+    |---|---|---|---|
+    | 1.4 | 0.49–0.70 | −0.31 to −0.04 | 24 of 70 |
+    | 1.6 | 0.40–0.56 | −0.32 to −0.16 | 48 of 70 |
+    | 1.8 | 0.35–0.47 | −0.34 to −0.22 | 0 of 70 |
+    | E-mini | 0.51 | −0.01 | |
+
+  - **The sign autocorrelation matches the E-mini.** With α = 1.6, N = 1 and f = 0.85 the model follows
+    the E-mini's per-order curve from lag 1 to 1,000:
+
+    | lag | 1 | 10 | 100 | 1,000 | γ (10–1,000) |
+    |---|---|---|---|---|---|
+    | model | 0.41 | 0.14 | 0.037 | 0.010 | 0.58 |
+    | E-mini | 0.45 | 0.08 | 0.032 | 0.002 | 0.65 |
+
+    It runs a little high at lags 3–30 and has no cutoff near 1,000 orders (expected with the pure
+    power law). With α = 1.4 the signs persist too long; with α = 1.8 they fade too fast. The values
+    follow f²/(α·N) as estimated above. The signs are identical at λ₀ = 100 and 7, as they should be:
+    the takers' sides do not depend on the book.
+  - **The shape of H is wrong.** The E-mini's H dips to 0.38 at about 20 trades and is back at 0.5 and
+    flat from about 100 trades. In the model the dip comes later and deeper (e.g. α = 1.6, N = 1,
+    f = 0.85: 0.36 at about 125 trades at λ₀ = 100, 0.29 at about 160 at λ₀ = 7), and H then rises
+    steeply and overshoots (0.63–0.64 at 10,000 trades; up to about 0.8 with α = 1.4). Most passes of
+    (b) at α = 1.6 are H crossing 0.5 near 1,000 trades on its way up, since (b) only looks at that one
+    lag. The only setups that pass (c) are α = 1.4 at λ₀ = 100 with N = 1–5 and f = 0.85–1 (ρ₁₀₀ −0.04
+    to −0.10), and their H at 1,000 trades is 0.66–0.70, so they fail (b). No setting fixes both.
+  - **Reading (not tested).** The book's reversion acts at about 100 trades and the splitters'
+    persistence at longer lags, so in the model they do not cancel at the same lags; in the E-mini they
+    do. Bouchaud, Gefen, Potters and Wyart (2004) describe a real market's price as a random walk
+    because the reversion from limit orders keeps pace with persistent market orders. In the model the
+    providers do not respond to the order flow at all.
+  - **q(t) makes no difference once splitters are present:** between q on and off, H at 1,000 trades
+    differs by at most 0.017, ρ₁₀₀ by 0.011 and the lag-1 sign correlation by 0.002.
+  - **λ₀:** for the same setting, ρ₁₀₀ is less negative at λ₀ = 100 than at λ₀ = 7.
+  - **Stability:** no market order hit an empty book and no step had a missing mid-price. The largest
+    hidden order was 68,868 units. With N = 1 the kurtosis at 1,000 trades rises (up to 5.3 at α = 1.6,
+    f = 1), since single very large hidden orders dominate the flow.
+  - **A measurement artefact.** The model's H is exactly 0.5 below about 10 trades: the price
+    statistics use the mid-price at the end of the step before each trade (D37), so the 12 or so
+    trades of a step share one mid-price. The mid-price just before each trade is now recorded (D41);
+    using it for all price statistics would make short lags comparable and could move the model's dip.
+    Whether to change this: **[Open]**.
+- **Open after the trial:** the measurement point above; whether to keep q(t) for the random takers,
+  given it makes no difference; and what to try next, given that the reversion and the persistence do
+  not line up. **[Open]**
