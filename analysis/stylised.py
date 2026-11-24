@@ -12,8 +12,6 @@ Each segment is a dict of arrays with one entry per trade, in order:
     bid_size    units resting at the best bid just before the trade
     ask_size    units resting at the best ask just before the trade
     size        the trade's size in units (optional)
-    sign_mid    the mid-price just before the trade, if "mid" is not (optional; the model's "mid" is
-                from the end of the step before), used only to tell buys from sells
     time        the trade's timestamp (optional; real data), used only to merge the fills of one order
 
 Time is counted in trades: a lag of 10 is ten trades later.
@@ -45,10 +43,8 @@ SIGN_FIT = (10, 1000)                                  # lags over which the pow
 
 def trade_signs(segment: Dict[str, np.ndarray]) -> np.ndarray:
     """+1 for a trade above the mid-price in force just before it (a buy hitting the ask), -1 below it
-    (a sell hitting the bid), 0 at the mid-price or with no mid-price, where the side cannot be told.
-    Uses sign_mid if the segment has it (the model's mid just before each trade; its "mid" is from the
-    end of the step before), otherwise mid (real data, where it is the last quote before the trade)."""
-    s = np.sign(segment["trade"] - segment.get("sign_mid", segment["mid"]))
+    (a sell hitting the bid), 0 at the mid-price or with no mid-price, where the side cannot be told."""
+    s = np.sign(segment["trade"] - segment["mid"])
     return np.nan_to_num(s, nan=0.0)
 
 

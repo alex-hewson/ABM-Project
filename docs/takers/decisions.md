@@ -245,3 +245,33 @@ stays unique.
 - **Open after the trial:** the measurement point above; whether to keep q(t) for the random takers,
   given it makes no difference; and what to try next, given that the reversion and the persistence do
   not line up. **[Open]**
+
+**D43. The model's per-trade mid-price: the mid-price just before each trade. [Assumed, Checked]**
+- **Why.** The price statistics compared with the E-mini (D37) took the model's per-trade mid-price
+  from the end of the step before the trade's step. The 12 or so trades of a step therefore shared
+  one mid-price, which made H exactly 0.5 below about 10 trades and hid how often the mid-price moves
+  within a step (D42 trial results). The E-mini's per-trade mid-price is the last quote before each
+  trade. Since D41 the model records the mid-price in the book just before each trade
+  (`trade_mids`); **decided:** every price statistic now uses it (`experiments/common.py`,
+  `trade_segment`), as the trade signs already did. A trade with one side of the book empty keeps the
+  last mid-price before it. The spread and the units at the best prices still come from the end of the
+  step before.
+- **Needs new runs.** The result files hold only statistics, not the per-trade series, so the model's
+  numbers in D37–D42 stay on the old basis; a trial gives numbers on the new basis only when rerun.
+  The E-mini's numbers do not change.
+- **What it changes** (one run of 50,000 steps each, the first 5,000 left out, both definitions from
+  the same run, N_A = 500, λ₀ = 100):
+
+  | | H(10) | lowest H, at | H(1,000) | ρ₁₀₀ | κ₁ / κ₁₀ / κ₁₀₀ / κ₁₀₀₀ | mid moves |
+  |---|---|---|---|---|---|---|
+  | fixed depth, end-of-step mid | 0.47 | 0.21 at 161 | 0.34 | −0.33 | 51 / 5.4 / 2.92 / 2.63 | 7.1% |
+  | fixed depth, per-trade mid | 0.29 | 0.15 at 161 | 0.28 | −0.37 | 15 / 3.4 / 2.81 / 2.70 | 65% |
+  | splitting (α 1.6, N 1, f 0.85), end-of-step | 0.50 | 0.37 at 161 | 0.52 | −0.15 | 53 / 5.6 / 2.94 / 4.52 | 7.1% |
+  | splitting, per-trade mid | 0.37 | 0.30 at 45 | 0.50 | −0.22 | 18 / 3.9 / 2.82 / 4.35 | 55% |
+  | E-mini | 0.41 | 0.38 at 21 | 0.51 | −0.01 | 61 / 8.6 / 3.50 / 2.90 | 2.35% |
+
+  At λ₀ = 100 the queue at the best price is about 2 units, so most market orders empty it and move
+  the mid-price: it moves on 55–65% of trades, not the 7% the end-of-step mid-price suggested (E-mini
+  2.35%). With splitting the dip in H moves from about 160 trades to about 45, closer to the
+  E-mini's 21, and ρ₁₀₀ becomes more negative. The kurtosis at 1–10 trades falls, since it mostly
+  reflects how often the mid-price stays put (D38 (a)).

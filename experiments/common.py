@@ -57,28 +57,32 @@ def describe_mix(mix, n_agents=N_AGENTS):
 
 def trade_segment(r, skip_steps: int = 1) -> dict:
     """One run (run with record_sides=True and record_trades=True) as a segment for
-    analysis/stylised.py: per trade, the trade price, and the mid-price, spread and units at the best
-    prices at the end of the step before the trade's step, and the mid-price just before each trade
-    (sign_mid). Trades in the first skip_steps steps are
-    left out (at least step 0, which has no step before it)."""
+    analysis/stylised.py: per trade, the trade price; the mid-price just before the trade, as the
+    last quote before a trade in real data (D43); and the spread and units at the best prices at the
+    end of the step before the trade's step. Trades in the first skip_steps steps are left out (at
+    least step 0, which has no step before it)."""
     keep = r.trade_steps >= max(skip_steps, 1)
     before = r.trade_steps[keep] - 1                       # the state at the end of the step before
     bid, ask = r.best_bid_series, r.best_ask_series
-    mid = (bid + ask) / 2
-    mid = np.where(np.isfinite(mid), mid, np.nan)
-    filled = np.copy(mid)                                  # a step with one side empty keeps the last mid
+    step_mid = (bid + ask) / 2
+    step_mid = np.where(np.isfinite(step_mid), step_mid, np.nan)
+    filled = np.copy(step_mid)                             # a step with one side empty keeps the last mid
     for i in range(1, len(filled)):
         if not np.isfinite(filled[i]):
             filled[i] = filled[i - 1]
-    out = {"trade": r.trade_prices[keep].astype(float), "mid": filled[before], "spread": (ask - bid)[before],
+    if len(r.trade_mids) == len(r.trade_steps):
+        # The mid-price in the book just before each trade (D43). A trade with one side of the book
+        # empty has none; it keeps the last one before it (or the end-of-step mid, for a first trade).
+        mid = np.asarray(r.trade_mids, dtype=float)[keep]
+        for i in range(len(mid)):
+            if not np.isfinite(mid[i]):
+                mid[i] = mid[i - 1] if i > 0 else filled[before][0]
+    else:
+        mid = filled[before]                               # runs made before trade_mids was recorded
+    return {"trade": r.trade_prices[keep].astype(float), "mid": mid, "spread": (ask - bid)[before],
             "bid_size": r.best_bid_size_series[before].astype(float),
             "ask_size": r.best_ask_size_series[before].astype(float),
-           "size": np.ones(int(keep.sum()))}              # every order of these agents is one unit
-    if len(r.trade_mids) == len(r.trade_steps):
-        # The mid-price just before each trade, for telling buys from sells (D41). The end-of-step mid
-        # above is up to a step old, so trades in the same step would all be judged against it.
-        out["sign_mid"] = r.trade_mids[keep]
-    return out
+            "size": np.ones(int(keep.sum()))}             # every order of these agents is one unit
 
 
 def hurst_curves(runs, n_agents, price):

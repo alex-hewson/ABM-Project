@@ -411,6 +411,8 @@ Asked for by the supervisors: comparable statistics for the model and the real m
 - **Per trade:** the trade price, and the mid-price, spread and units at the best bid and ask of the
   last quote before it. In the model, whose state is only recorded at the end of each step, they are
   taken from the end of the step before the trade's step.
+  From 24 November 2026 the model's per-trade mid-price is the one in the book just before each
+  trade, not the end of the step before (`docs/takers/decisions.md`, D43).
 - **Price compared: the mid-price.** Every price statistic of model and data is compared on the
   mid-price in force at each trade. A trade price is either the bid or the ask, so it jumps back and
   forth across the spread (the bid-ask bounce). That adds a reversal that is not a move of the price

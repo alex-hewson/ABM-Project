@@ -92,6 +92,19 @@ def test_simulation_with_splitters():
         splitting=SplittingSettings(), taker_mix={__import__("abm.agents", fromlist=["AgentType"]).AgentType(1, 1): 125}, **KW)))
 
 
+def test_price_statistics_use_the_mid_just_before_each_trade():
+    r = run_simulation(splitting=SplittingSettings(share=0.85, n_hidden=1, alpha=1.6), **KW)
+    seg = trade_segment(r, 200)
+    keep = r.trade_steps >= 200
+    check("the segment's mid-price is the one recorded just before each trade (D43)",
+          np.allclose(seg["mid"], r.trade_mids[keep], equal_nan=False))
+    same_step = r.trade_steps[keep][1:] == r.trade_steps[keep][:-1]
+    moved = np.diff(seg["mid"]) != 0
+    check(f"so it can change between two trades of the same step ({np.mean(moved[same_step]):.1%} of them)",
+          np.any(moved & same_step))
+    check("every trade is above or below its mid-price, none at it", np.all(seg["trade"] != seg["mid"]))
+
+
 def test_sweep_grid():
     check("2 x 3 x 5 x 7 = 210 jobs", len(sweep.GRID) == 210)
     check("every job has its own name", len({sweep.name_of(i) for i in range(210)}) == 210)

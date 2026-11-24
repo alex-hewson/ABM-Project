@@ -111,7 +111,7 @@ class SimulationResult:
     trade_steps: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=int))
     trade_prices: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=int))
     # The mid-price in the book just before each of those trades (NaN if one side was empty), as the
-    # last quote before a trade in real data. Used to tell buys from sells (D41).
+    # last quote before a trade in real data: the per-trade mid-price of the statistics (D41, D43).
     trade_mids: np.ndarray = field(default_factory=lambda: np.empty(0))
     # How many units of the shock found nothing left to trade against (0 if there was no shock).
     shock_unfilled: int = 0
