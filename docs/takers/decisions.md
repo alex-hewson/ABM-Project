@@ -46,4 +46,30 @@ stays unique.
   563,245 trades): +0.002 at lags 1 and 2, and within ±0.002 at every lag up to 10,000, the same at
   λ₀ = 100 and 7. That matches the expected 0.001 within the noise (about ±0.0013 for this many
   trades). No side was undecided (no trades at the mid-price).
-- **The E-mini:** to be measured (`python -m experiments.emini stats PATH`). **[Open]**
+- **The E-mini** (5 and 7 May 2010, regular hours, 1,592,939 fills; measured 23 November 2026):
+
+  | lag | per fill | per order (fills merged) |
+  |---|---|---|
+  | 1 | +0.805 | +0.453 |
+  | 2 | +0.732 | +0.334 |
+  | 3 | +0.679 | +0.255 |
+  | 10 | +0.468 | +0.080 |
+  | 32 | +0.235 | +0.054 |
+  | 100 | +0.092 | +0.032 |
+  | 316 | +0.031 | +0.017 |
+  | 1,000 | +0.017 | +0.002 |
+  | 3,162 | +0.004 | +0.004 |
+  | 10,000 | +0.006 | −0.000 |
+
+  An order is 2.80 fills on average; 0.1% of fills are at the mid-price (side unknown). The noise
+  level is about ±0.001 per fill and ±0.0013 per order (one over the square root of the number of
+  signs). Per order, which is the like-for-like comparison with the model (one fill per order), the
+  autocorrelation falls fast over the first 10 orders (0.45 to 0.08), then slowly from 10 to a few
+  hundred orders (0.08 to 0.02), and is within the noise from about 1,000 orders. The fitted exponent
+  depends on the range: γ = 0.36 over 10–100 orders, 0.65 over 10–1,000 and 1.13 over 100–1,000, so
+  the slow part steepens towards a cutoff near 1,000 orders. Over 10–1,000 orders γ = 0.65 is inside
+  Lillo and Farmer's 0.36–0.77. With two days of data the shape beyond a few hundred orders is not
+  well determined.
+- **Result.** The E-mini's order signs persist strongly at short lags and weakly out to a few
+  hundred orders; the model's takers have no persistence at any lag (0.002 against 0.45 at lag 1,
+  0.08 at lag 10 and 0.03 at lag 100). This is the missing half of the balance described above.
