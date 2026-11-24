@@ -39,6 +39,7 @@ from abm.orderbook import OrderBook, Side, OrderResult
 from abm.agents import (LiquidityProvider, LiquidityTaker, ValueTrader, AgentType, draw_value_shift,
                         MomentumTrader, TrendReader, TypicalSize, momentum_buy_probability)
 from abm.buy_probability import SideProbability
+from abm.order_splitting import HiddenOrders, SplittingSettings, SplittingTaker
 from abm.volatility_provider import VolatilityGauge, VolatilityProvider, VolatilitySettings
 
 
@@ -127,6 +128,9 @@ class SimulationResult:
     poisson_steps: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=int))
     poisson_sizes: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=int))
     poisson_unfilled: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=int))
+    # Order splitting (filled only if run_simulation was given splitting): the size of every hidden
+    # order started, in order (D42).
+    hidden_order_sizes: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=np.int64))
     # Momentum traders (filled only if run_simulation had n_momentum_traders above 0): for each order of
     # trader present, the price move it predicted in each step (0 until the window has filled).
     trend_series: Dict[int, np.ndarray] = field(default_factory=dict)
@@ -231,6 +235,7 @@ def run_simulation(
     momentum_orders: Sequence[int] = (2,),
     momentum_window: int = 50,
     momentum_scale: float = 1.0,
+    splitting: Optional[SplittingSettings] = None,
 ) -> SimulationResult:
     """
     Run the base Preis et al. model for n_steps, after a pre-opening
@@ -336,6 +341,15 @@ def run_simulation(
     the window has filled, and for the first momentum_window steps after, they have no trend to follow
     (or no idea yet of its normal size) and buy or sell with equal chance. If taker_mix is given, it must add up to the takers left after value and momentum traders.
     The predicted moves are returned in result.trend_series.
+
+    splitting turns a share of the takers into splitters (docs/takers/decisions.md, D42; see
+    abm/order_splitting.py); None (the default) leaves the run exactly as it was. A splitter acts like
+    a taker, with chance mu per step, but places one unit of one of splitting.n_hidden hidden orders,
+    picked at random, on that order's side; hidden order sizes follow a power law with exponent
+    splitting.alpha, and their sides are buys or sells with equal chance. The other takers are
+    unchanged (with taker_flow, their side follows q(t)). The hidden orders have their own random
+    numbers. The size of every hidden order started is returned in result.hidden_order_sizes. It needs
+    the paper's unit takers (no taker_mix).
     """
     if method not in ("fast", "agents"):
         raise ValueError(f"method must be 'fast' or 'agents', got {method!r}")
@@ -373,6 +387,8 @@ def run_simulation(
         raise ValueError("momentum_scale must be above 0")
     if value_spread < 0:
         raise ValueError("value_spread must be 0 or more")
+    if splitting is not None and taker_mix is not None:
+        raise ValueError("splitting needs the paper's unit takers: leave taker_mix out")
     provider_mix = _check_mix(provider_mix, n_agents, "provider_mix")
     taker_mix = _check_mix(taker_mix, n_agents - n_value_traders - n_momentum_traders, "taker_mix")
     fast = method == "fast"    #Checks which method has been selected
@@ -382,6 +398,7 @@ def run_simulation(
     # News draws from its own stream, so the main one is the same with or without news.
     news_rng = random.Random(None if seed is None else f"news-{seed}")
     poisson_rng = random.Random(None if seed is None else f"poisson-{seed}")    # the same for the Poisson trader
+    split_rng = random.Random(None if seed is None else f"split-{seed}")        # and for the hidden orders
     step_trade_prices: List[int] = []     # prices of the trades in the current step
     all_trade_steps: List[int] = []       # with record_trades: the step and price of every trade
     all_trade_prices: List[int] = []
@@ -417,6 +434,15 @@ def run_simulation(
                        interval=agent_type.interval, size=agent_type.size, offset=i % agent_type.interval)
         for agent_type, count in taker_mix.items() for i in range(count)
     ]
+    # Splitters take the place of the first share of the takers (all of type 1 unit, every step), so a
+    # share of the market orders comes from the hidden orders. The takers that act in a step are picked
+    # in a random order, so the splitters' pieces are mixed in with the random takers' orders.
+    hidden = HiddenOrders(splitting, split_rng) if splitting is not None else None
+    if hidden is not None:
+        for i in range(round(splitting.share * len(takers))):
+            t0 = takers[i]
+            takers[i] = SplittingTaker(agent_id=t0.agent_id, mu=mu, q_taker=q_taker, interval=t0.interval,
+                                       size=1, offset=t0.offset, hidden=hidden)
     # Value traders take the place of some of the takers. Each draws its own shift once, here.
     value_traders = [
         ValueTrader(agent_id=next(taker_ids), mu=mu, shift=draw_value_shift(rng, value_spread))
@@ -507,7 +533,7 @@ def run_simulation(
                     failures += 1
         else:
             everyone = takers + value_traders + momentum_traders
-            if value_traders or momentum_traders:
+            if value_traders or momentum_traders or hidden is not None:
                 rng.shuffle(everyone)       # one random order, as in the fast method
             for agent in everyone:
                 if isinstance(agent, ValueTrader):
@@ -671,6 +697,7 @@ def run_simulation(
         poisson_steps=np.array(poisson_steps, dtype=int),
         poisson_sizes=np.array(poisson_sizes, dtype=int),
         poisson_unfilled=np.array(poisson_unfilled, dtype=int),
+        hidden_order_sizes=np.array(hidden.sizes if hidden is not None else [], dtype=np.int64),
         value_shifts=np.array([v.shift for v in value_traders]),
         trend_series=trend_series,
     )

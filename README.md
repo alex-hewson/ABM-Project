@@ -298,6 +298,20 @@ sbatch cluster/lambda_sweep.slurm
 python -m experiments.lambda_sweep collect
 ```
 
+### Order splitting trial
+
+A share of the takers become splitters, who work through hidden large orders one unit at a time, after
+Lillo, Mike and Farmer (2005) (`abm/order_splitting.py`; `docs/takers/decisions.md`, D42), switched
+on with `run_simulation(splitting=SplittingSettings(...))`. The trial runs every combination of the
+share of splitters, the number of hidden orders, the size exponent, q(t) on or off, and λ₀ = 100 or 7,
+and compares the sign autocorrelation of trades with the E-mini's (D41):
+
+```
+python -m experiments.splitting_sweep list
+sbatch cluster/splitting_sweep.slurm
+python -m experiments.splitting_sweep collect
+```
+
 ### Value trader sweep
 
 Tries 48 combinations of value trader settings (share of takers, amount of news, mean error), plus a control
