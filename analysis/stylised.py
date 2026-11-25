@@ -48,17 +48,44 @@ def trade_signs(segment: Dict[str, np.ndarray]) -> np.ndarray:
     return np.nan_to_num(s, nan=0.0)
 
 
-def order_signs(segment: Dict[str, np.ndarray]) -> np.ndarray:
-    """The trade signs with each run of fills that share a timestamp and a side counted once: in real
-    data one market order that takes out several resting orders appears as several fills. Needs
-    "time"; a segment without it (the model, where every order is one fill) is returned unchanged."""
+def first_fills(segment: Dict[str, np.ndarray]) -> np.ndarray:
+    """True for the first fill of each order: a run of fills that share a timestamp and a side is one
+    market order that took out several resting orders (real data). Without "time" (the model, where
+    every order is one fill) every fill is an order."""
     s = trade_signs(segment)
-    if "time" not in segment or len(s) == 0:
-        return s
-    t = segment["time"]
-    same = np.zeros(len(s), dtype=bool)
-    same[1:] = (t[1:] == t[:-1]) & (s[1:] == s[:-1]) & (s[1:] != 0)
-    return s[~same]
+    keep = np.ones(len(s), dtype=bool)
+    if "time" in segment and len(s) > 1:
+        t = segment["time"]
+        keep[1:] = ~((t[1:] == t[:-1]) & (s[1:] == s[:-1]) & (s[1:] != 0))
+    return keep
+
+
+def order_signs(segment: Dict[str, np.ndarray]) -> np.ndarray:
+    """The trade signs with the fills of one order counted once (see first_fills)."""
+    return trade_signs(segment)[first_fills(segment)]
+
+
+def as_orders(segment: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+    """The segment with only the first fill of each order: its trade price, and the mid-price just
+    before the order (D41)."""
+    keep = first_fills(segment)
+    return {"trade": segment["trade"][keep], "mid": segment["mid"][keep]}
+
+
+def response_function(segments: Sequence[Dict[str, np.ndarray]], lags=SIGN_LAGS) -> np.ndarray:
+    """R(l) = <(m_(n+l) - m_n) * s_n>: how far the mid-price has moved, on average, l trades after a
+    trade, in the direction of that trade, in ticks (Bouchaud, Gefen, Potters and Wyart 2004, Eq. 3).
+    m_n is the mid-price just before trade n and s_n its sign; pairs stay within a segment."""
+    total, count = np.zeros(len(lags)), np.zeros(len(lags))
+    for seg in segments:
+        s, m = trade_signs(seg), np.asarray(seg["mid"], dtype=float)
+        for i, lag in enumerate(lags):
+            if len(m) > lag:
+                moves = (m[lag:] - m[:-lag]) * s[:-lag]
+                ok = np.isfinite(moves)
+                total[i] += moves[ok].sum()
+                count[i] += ok.sum()
+    return np.where(count > 0, total / np.maximum(count, 1), np.nan)
 
 
 def sign_autocorrelation(segments: Sequence[Dict[str, np.ndarray]], lags=SIGN_LAGS, signs=trade_signs) -> np.ndarray:
@@ -176,6 +203,9 @@ def stylised_facts(segments: Sequence[Dict[str, np.ndarray]]) -> dict:
         n_orders = sum(len(order_signs(s)) for s in segments)
         out["signs"]["orders"] = {"autocorr": ac, "gamma": power_law_exponent(SIGN_LAGS, ac),
                                   "fills_per_order": float(len(signs) / n_orders) if n_orders else float("nan")}
+    out["response"] = {"lags": SIGN_LAGS, "per_trade": response_function(segments)}
+    if all("time" in s for s in segments):              # real data: also per order, fills merged
+        out["response"]["per_order"] = response_function([as_orders(s) for s in segments])
     return out
 
 
@@ -208,10 +238,24 @@ def summary_rows(facts: dict) -> List[tuple]:
             rows.append((f"autocorr. of trade signs, lag {lag}", f"{g['autocorr'][lags.index(lag)]:+.3f}"))
         rows += [(f"power-law exponent of sign autocorr. ({SIGN_FIT[0]}-{SIGN_FIT[1]} trades)", f"{g['gamma']:.2f}"),
                  ("trades whose side cannot be told (at the mid)", f"{g['share_unknown']:.1%}")]
+        if "response" in facts:
+            rows += response_rows(facts["response"]["per_trade"], "response R(l), ticks")
+            if "per_order" in facts["response"]:
+                rows += response_rows(facts["response"]["per_order"], "same, fills of one order merged")
         if "orders" in g:
             o = g["orders"]
             for lag in (1, 10, 100, 1000):
                 rows.append((f"same, fills of one order merged, lag {lag}", f"{o['autocorr'][lags.index(lag)]:+.3f}"))
             rows += [("same, fills of one order merged: exponent", f"{o['gamma']:.2f}"),
                      ("fills per order (same time and side)", f"{o['fills_per_order']:.2f}")]
+    return rows
+
+
+def response_rows(r: np.ndarray, label: str) -> List[tuple]:
+    """R at a few lags, and where it peaks, for the summary table."""
+    lags = list(SIGN_LAGS)
+    rows = [(f"{label}, lag {lag}", f"{r[lags.index(lag)]:+.3f}") for lag in (1, 10, 100, 1000, 10000)]
+    if np.isfinite(r).any():
+        peak = int(np.nanargmax(r))
+        rows.append((f"{label}: largest", f"{r[peak]:+.3f} at lag {lags[peak]}"))
     return rows

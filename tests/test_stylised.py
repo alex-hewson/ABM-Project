@@ -5,8 +5,8 @@ Run with: python -m tests.test_stylised   (from the project root)
 
 import numpy as np
 
-from analysis.stylised import (LAGS, KURTOSIS_LAGS, SIGN_LAGS, changes, order_signs, power_law_exponent, sign_autocorrelation,
-                               stylised_facts, trade_signs)
+from analysis.stylised import (LAGS, KURTOSIS_LAGS, SIGN_LAGS, as_orders, changes, order_signs, power_law_exponent, sign_autocorrelation,
+                               response_function, stylised_facts, trade_signs)
 
 
 def check(label, condition):
@@ -111,6 +111,29 @@ def test_fills_of_one_order_are_merged():
     check(f"but the orders themselves are independent ({ac_orders[0]:+.3f})", abs(ac_orders[0]) < 0.01)
     facts = stylised_facts([seg])
     check("stylised_facts reports fills per order", abs(facts["signs"]["orders"]["fills_per_order"] - 3) < 1e-9)
+
+
+def test_response_function():
+    rng = np.random.default_rng(5)
+    signs = rng.choice([-1, 1], 200_000)
+    lags = list(SIGN_LAGS)
+    # Permanent impact: each trade moves the mid-price one tick its way, for good.
+    mid = np.concatenate([[0.0], np.cumsum(signs)[:-1]])
+    seg = {"trade": mid + 0.5 * signs, "mid": mid}
+    r = response_function([seg])[SIGN_LAGS <= 100]      # longer lags add up more unrelated signs: noisier
+    check(f"permanent impact: R = 1 at lags 1-100 (from {np.nanmin(r):.3f} to {np.nanmax(r):.3f})",
+          np.all(np.abs(r - 1) < 0.05))
+    # Impact that lasts one trade: the mid-price is the last trade's sign, so R(1) = 1, then 0.
+    mid = np.concatenate([[0.0], signs[:-1]]).astype(float)
+    r = response_function([{"trade": mid + 0.5 * signs + 10 * np.sign(signs), "mid": mid}])
+    check(f"impact lasting one trade: R(1) = 1 ({r[0]:.3f})", abs(r[0] - 1) < 0.01)
+    check(f"and about 0 after ({np.max(np.abs(r[1:])):.3f})", np.all(np.abs(r[1:]) < 0.02))
+    seg = signed_segment([1, 1, -1])
+    seg["time"] = np.array([0, 0, 1])
+    check("per order, the fills of one order count once", list(as_orders(seg)["trade"]) == [100.5, 99.5])
+    facts = stylised_facts([signed_segment(signs)])
+    check("stylised_facts keeps the response per trade, and per order only with timestamps",
+          "per_trade" in facts["response"] and "per_order" not in facts["response"])
 
 
 if __name__ == "__main__":

@@ -275,3 +275,36 @@ stays unique.
   2.35%). With splitting the dip in H moves from about 160 trades to about 45, closer to the
   E-mini's 21, and ρ₁₀₀ becomes more negative. The kurtosis at 1–10 trades falls, since it mostly
   reflects how often the mid-price stays put (D38 (a)).
+- **Reruns on the new basis (25 November 2026):** the mean entry depth trial (D40, 30 jobs) and the
+  order splitting trial (D42, 210 jobs), with the same settings. The old results are kept in
+  `results/lambda_sweep_end_of_step_mid/` and `results/splitting_sweep_end_of_step_mid/`. The first
+  volatility provider trial (D39) was not rerun, so the λ₀ = 100 rows that `lambda_sweep collect`
+  shows beside the new runs are still on the old basis. Figure: `results/lambda_sweep/mid_moves.png`.
+  - **How often the mid-price moves** (fixed-depth control; setup 84 in brackets):
+
+    | λ₀ | 30 | 10 | 8 | 7 | 6 | 5 |
+    |---|---|---|---|---|---|---|
+    | old basis | 5.8% | 3.6% | 3.1% | 2.7% | 2.0% | 0.5% |
+    | new basis | 40% (42%) | 15% (17%) | 11% (13%) | 8.4% (10%) | 4.8% (6.3%) | 1.0% (4.2%) |
+
+    The new values are 2–7 times the old, most at large λ₀; λ₀ = 100 is about 65% (one short run,
+    above). The E-mini's 2.35% now lies between λ₀ = 5 and 6, not between 5 and 10. Below λ₀ = 6 the
+    control falls steeply as the price starts to freeze; setup 84 holds up better at λ₀ = 5, partly
+    because its mean depth is above λ₀.
+  - **Mean entry depth trial, (b) and (c):** worse in narrow books on the new basis. For the control,
+    H at 1,000 trades is 0.23–0.31 (0.27–0.37 before) and ρ₁₀₀ −0.38 to −0.40 (−0.32 to −0.36
+    before) at λ₀ = 6–30; setup 84 is the same within 0.03. D40's conclusion stands, more strongly: a
+    narrower book does not fix (b) or (c). The "both ways" setups still freeze below λ₀ = 10.
+  - **Order splitting trial:** (a) still passes in all 210, (b) now in 114 (72 before), (c) in none
+    (6 before); still none passes both. ρ₁₀₀ is 0.05–0.11 more negative everywhere (best −0.09, at
+    α = 1.4 and λ₀ = 100; −0.22 to −0.38 at α = 1.6). H at 1,000 trades is 0.01–0.06 lower; the extra
+    passes of (b) come from H at 10 trades falling from about 0.5 to about 0.3, which makes "H(1,000)
+    above H(10)" easier to meet, not from a better H at 1,000 trades. The kurtosis at 1 trade falls
+    from about 50 to 15–21 (E-mini 61). The mid-price moves on 6–8% of trades at λ₀ = 7 and on 47–64%
+    at λ₀ = 100. The sign statistics are unchanged, as they already used this mid-price.
+  - **The shape of H with splitting** (`results/splitting_sweep/hurst.png`): the artefact below 10
+    trades is gone. The model's H starts near 0.5 and dips from about 5 trades, like the E-mini's,
+    but deeper (0.20–0.36 against 0.38), with its lowest point later (30–100 trades against 21), and
+    it is back at 0.5 only by about 1,000 trades against about 100, before overshooting as before.
+    The E-mini's price reverts a little and briefly; the model's reverts a lot and for long, then
+    trends.
