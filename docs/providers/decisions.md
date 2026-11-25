@@ -1,7 +1,7 @@
 # Decisions: liquidity providers
 
 Decisions for the part of the project that works on the liquidity providers: where they place orders
-and how they respond to the order flow (branch `order-splitting`). Earlier decisions are in
+and how they respond to the order flow (branch `provider-placement`). Earlier decisions are in
 `docs/decisions.md` (D1–D37), `docs/volatility_provider/decisions.md` (D38–D40) and
 `docs/takers/decisions.md` (D41–D44); numbers carry on from there, so every D number stays unique.
 
@@ -137,4 +137,65 @@ and how they respond to the order flow (branch `order-splitting`). Earlier decis
   Bouchaud et al. with crossing orders drawn again gives the E-mini's spread almost exactly, but the
   mid-price moves on only 0.17% of trades. Allowing crossing turns the providers into heavy takers
   (14–30% of their orders trade at once), and with Mike and Farmer the spread widens to 9–35 ticks.
+- **Trial results** (25 November 2026; 4 runs of 120,000 steps per job, the first 20,000 left out;
+  `results/placement_sweep/`: `summary.csv`, `hurst.png`, `response.png`). With the splitting takers,
+  the book and the mid-price moves:
+
+  | providers | trades per step | crossed | spread | at one tick | queue | mid moves | half a tick | s(1) |
+  |---|---|---|---|---|---|---|---|---|
+  | Preis, λ₀ = 7 | 12.5 | | 1.42 | 59% | 26 | 6.1% | 97% | 0.41 |
+  | Preis, λ₀ = 100 | 12.5 | | 19.7 | 0% | 2 | 56% | 45% | 0.41 |
+  | Bouchaud et al., drawn again | 12.5 | 0% | 1.01 | 99% | 68 | 0.14% | 96% | 0.41 |
+  | Bouchaud et al., allowed | 22.9 | 14% | 1.97 | 19% | 25 | 11% | 61% | 0.20 |
+  | Mike and Farmer 5, drawn again | 12.5 | 0% | 1.45 | 56% | 26 | 6.6% | 96% | 0.41 |
+  | Mike and Farmer 5, allowed | 35.0 | 30% | 9.1 | 0% | 4 | 56% | 45% | 0.13 |
+  | Mike and Farmer 11, drawn again | 12.5 | 0% | 2.78 | 14% | 9 | 19% | 80% | 0.41 |
+  | Mike and Farmer 11, allowed | 35.0 | 30% | 19.4 | 0% | 2 | 68% | 30% | 0.13 |
+  | Mike and Farmer 20, drawn again | 12.5 | 0% | 4.75 | 4% | 5 | 30% | 71% | 0.41 |
+  | Mike and Farmer 20, allowed | 35.0 | 30% | 34.9 | 0% | 2 | 76% | 23% | 0.13 |
+  | E-mini | | | 1.02 | 99% | 173 | 2.35% | 16% | 0.45 |
+
+  s(1) is the sign autocorrelation of trades at lag 1 (D41). The price statistics and the D38 tests:
+
+  | providers | kurtosis at 100 / 1,000 trades | H(10) / H(1,000) | ρ₁₀₀ | R(100) / R(10,000), ticks | tests passed |
+  |---|---|---|---|---|---|
+  | Preis, λ₀ = 7 | 2.8 / 4.0 | 0.34 / 0.48 | −0.30 | 0.055 / 0.28 | (a), (b) |
+  | Preis, λ₀ = 100 | 2.8 / 4.6 | 0.36 / 0.51 | −0.24 | 0.41 / 4.0 | (a), (b) |
+  | Bouchaud et al., drawn again | 32.1 / 7.3 | 0.44 / 0.57 | −0.06 | 0.02 / 0.14 | (b) |
+  | Bouchaud et al., allowed | 2.8 / 3.3 | 0.27 / 0.34 | −0.38 | 0.02 / 0.16 | (a) |
+  | Mike and Farmer 5, drawn again | 2.7 / 3.8 | 0.34 / 0.46 | −0.31 | 0.05 / 0.27 | (a), (b) |
+  | Mike and Farmer 5, allowed | 2.9 / 9.1 | 0.27 / 0.43 | −0.37 | 0.12 / 0.96 | (a), (b) |
+  | Mike and Farmer 11, drawn again | 2.7 / 4.2 | 0.33 / 0.48 | −0.29 | 0.07 / 0.63 | (a), (b) |
+  | Mike and Farmer 11, allowed | 2.8 / 6.1 | 0.27 / 0.42 | −0.37 | 0.25 / 2.1 | (a), (b) |
+  | Mike and Farmer 20, drawn again | 2.7 / 4.2 | 0.34 / 0.48 | −0.28 | 0.11 / 1.1 | (a), (b) |
+  | Mike and Farmer 20, allowed | 2.8 / 6.0 | 0.27 / 0.41 | −0.37 | 0.47 / 3.6 | (a), (b) |
+  | E-mini | 3.5 / 2.9 | 0.41 / 0.51 | −0.01 | 0.35 / 0.59 (per order) | |
+
+  With the random takers (q(t) on) no setup passes (b): H(1,000) is 0.14–0.30 and ρ₁₀₀ −0.38 to
+  −0.41, except Bouchaud et al. with crossing orders drawn again, where the mid-price moved about 180
+  times in 5 million trades (0.0035%; kurtosis at 100 trades about 1,500), so its statistics rest on
+  a handful of moves.
+- **Reading:**
+  - **No setup passes all three tests,** and none passes (c).
+  - **Bouchaud et al., crossing orders drawn again, gives the E-mini's quotes** (spread 1.01 ticks, at
+    one tick 99% of the time) and a deep queue (68), and ρ₁₀₀ near the E-mini's (−0.06). But the
+    mid-price moves 17 times less often than the E-mini's, so its rare moves make the returns very
+    fat-tailed (kurtosis 32 at 100 trades, failing (a)), and with random takers it barely moves at
+    all. The better H (the dip only to about 0.44) comes mostly from the price hardly moving, and
+    beyond 1,000 trades H overshoots to about 0.65. The moves that do happen are still 96% half-tick
+    openings of the spread (the E-mini: 16%), and they are reversed about as often as the E-mini's
+    (64% against 71%).
+  - **Mike and Farmer, crossing orders drawn again, behaves like the Preis providers:** scale 5 is
+    almost exactly Preis at λ₀ = 7, and larger scales widen the spread as a larger λ₀ does. With
+    these spread-out distributions the shape of the tail makes little difference; what matters is the
+    share of orders that land at the best price.
+  - **Allowing crossing is ruled out:** the providers trade 14–30% of their orders at once, trades per
+    step rise from 12.5 to 23–35, and the providers' random sides dilute the splitters' persistence
+    (s(1) 0.41 to 0.13–0.20). The dip in H deepens and ρ₁₀₀ falls to about −0.37.
+  - **The long-lag growth of the impact (D44, problem 1) remains** in every setup with crossing orders
+    drawn again: R(10,000) is 5–10 times R(100), against under 2 for the E-mini.
+  - **Placement fixes the quotes but not the moves.** With deep queues the price can hardly move: the
+    takers' unit orders and cancellation at the same small rate for every order rarely empty a queue
+    of about 70. The E-mini's queue at the best is 173 and the mid-price still moves about once every
+    43 trades. How real queues at the best price empty is the open question of D40. **[Open]**
 
