@@ -312,6 +312,20 @@ sbatch cluster/splitting_sweep.slurm
 python -m experiments.splitting_sweep collect
 ```
 
+### Placement trial
+
+Providers that place limit orders at a distance from the best price on their own side, drawn from
+Bouchaud, Mézard and Potters' power law or Mike and Farmer's Student t (`abm/placement.py`;
+`docs/providers/decisions.md`, D45), switched on with `run_simulation(placement=PlacementSettings(...))`.
+The trial runs both distributions, with crossing orders drawn again or allowed to trade, against the
+paper's providers, with splitting and with random takers:
+
+```
+python -m experiments.placement_sweep list
+sbatch cluster/placement_sweep.slurm
+python -m experiments.placement_sweep collect
+```
+
 ### Value trader sweep
 
 Tries 48 combinations of value trader settings (share of takers, amount of news, mean error), plus a control

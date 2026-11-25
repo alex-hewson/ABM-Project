@@ -40,6 +40,7 @@ from abm.agents import (LiquidityProvider, LiquidityTaker, ValueTrader, AgentTyp
                         MomentumTrader, TrendReader, TypicalSize, momentum_buy_probability)
 from abm.buy_probability import SideProbability
 from abm.order_splitting import HiddenOrders, SplittingSettings, SplittingTaker
+from abm.placement import DistanceSampler, PlacementCounts, PlacementSettings, PlacingProvider
 from abm.volatility_provider import VolatilityGauge, VolatilityProvider, VolatilitySettings
 
 
@@ -131,6 +132,10 @@ class SimulationResult:
     # Order splitting (filled only if run_simulation was given splitting): the size of every hidden
     # order started, in order (D42).
     hidden_order_sizes: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=np.int64))
+    # Placement from the best price (filled only if run_simulation was given placement): how many
+    # provider orders were placed, how many distances were drawn again, and how many orders crossed
+    # the spread and traded at once (D45).
+    placement_counts: Dict[str, int] = field(default_factory=dict)
     # Momentum traders (filled only if run_simulation had n_momentum_traders above 0): for each order of
     # trader present, the price move it predicted in each step (0 until the window has filled).
     trend_series: Dict[int, np.ndarray] = field(default_factory=dict)
@@ -236,6 +241,7 @@ def run_simulation(
     momentum_window: int = 50,
     momentum_scale: float = 1.0,
     splitting: Optional[SplittingSettings] = None,
+    placement: Optional[PlacementSettings] = None,
 ) -> SimulationResult:
     """
     Run the base Preis et al. model for n_steps, after a pre-opening
@@ -350,6 +356,14 @@ def run_simulation(
     unchanged (with taker_flow, their side follows q(t)). The hidden orders have their own random
     numbers. The size of every hidden order started is returned in result.hidden_order_sizes. It needs
     the paper's unit takers (no taker_mix).
+
+    placement replaces how providers choose the price of a limit order (docs/providers/decisions.md,
+    D45; see abm/placement.py); None (the default) keeps the paper's exponential distance from the
+    mid-price. With it, the distance is measured from the best price on the order's own side and drawn
+    from placement.rule ("bmp" or "student"); lambda_ is then not used for placement. Orders that would
+    cross the spread are drawn again (placement.crossing = "redraw") or trade at once ("allow"). The
+    counts of orders placed, drawn again and crossed are returned in result.placement_counts. It needs
+    the paper's unit providers (no provider_mix) and cannot be combined with Eq. 4 or volatility.
     """
     if method not in ("fast", "agents"):
         raise ValueError(f"method must be 'fast' or 'agents', got {method!r}")
@@ -389,6 +403,8 @@ def run_simulation(
         raise ValueError("value_spread must be 0 or more")
     if splitting is not None and taker_mix is not None:
         raise ValueError("splitting needs the paper's unit takers: leave taker_mix out")
+    if placement is not None and (provider_mix is not None or depth_coupling > 0 or volatility is not None):
+        raise ValueError("placement needs the paper's unit providers, without Eq. 4 or volatility")
     provider_mix = _check_mix(provider_mix, n_agents, "provider_mix")
     taker_mix = _check_mix(taker_mix, n_agents - n_value_traders - n_momentum_traders, "taker_mix")
     fast = method == "fast"    #Checks which method has been selected
@@ -429,6 +445,14 @@ def run_simulation(
         for agent_type, count in provider_mix.items() for i in range(count)
     ]
     gauge = VolatilityGauge(volatility, lambda_) if volatility is not None else None
+    # Placement from the best price (D45): every provider uses the same distribution and shares one
+    # set of counts. They keep their ids, rates and turns.
+    placement_counts = PlacementCounts() if placement is not None else None
+    if placement is not None:
+        sampler = DistanceSampler(placement)
+        providers = [PlacingProvider(agent_id=p.agent_id, alpha=alpha, q_provider=q_provider, lambda_=lambda_,
+                                     interval=p.interval, size=1, offset=p.offset, sampler=sampler,
+                                     counts=placement_counts) for p in providers]
     takers = [
         LiquidityTaker(agent_id=next(taker_ids), mu=mu, q_taker=q_taker,
                        interval=agent_type.interval, size=agent_type.size, offset=i % agent_type.interval)
@@ -698,6 +722,7 @@ def run_simulation(
         poisson_sizes=np.array(poisson_sizes, dtype=int),
         poisson_unfilled=np.array(poisson_unfilled, dtype=int),
         hidden_order_sizes=np.array(hidden.sizes if hidden is not None else [], dtype=np.int64),
+        placement_counts=vars(placement_counts).copy() if placement_counts is not None else {},
         value_shifts=np.array([v.shift for v in value_traders]),
         trend_series=trend_series,
     )
