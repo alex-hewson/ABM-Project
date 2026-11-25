@@ -9,7 +9,8 @@
 | [`paper_model.md`](paper_model.md) | The model as Preis et al. (2006) define it (P numbers) |
 | [`decisions.md`](decisions.md) | Decisions D1–D37: choices made where the paper is unclear, and for Phase 2 up to the E-mini comparison |
 | [`volatility_provider/decisions.md`](volatility_provider/decisions.md) | Decisions D38–D40: trialling agents one at a time, the volatility provider, its trial results and the mean entry depth trial |
-| [`takers/decisions.md`](takers/decisions.md) | Decisions D41 on: the liquidity takers' order flow, the autocorrelation of trade signs, and order splitting |
+| [`takers/decisions.md`](takers/decisions.md) | Decisions D41–D44: the liquidity takers' order flow, the autocorrelation of trade signs, order splitting, the per-trade mid-price and the response function |
+| [`providers/decisions.md`](providers/decisions.md) | Decisions D45 on: where the liquidity providers place their orders |
 | [`validation/`](validation/README.md) | The checks and numbers behind the decisions, and the comparison with the paper, one file per part. Section numbers run across the files; its `README.md` lists which file holds each |
 | [`figures/`](figures/) | The reproduced Figs. 2–4 shown in the main README |
 
