@@ -72,6 +72,41 @@ def as_orders(segment: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
     return {"trade": segment["trade"][keep], "mid": segment["mid"][keep]}
 
 
+def mid_move_stats(segments: Sequence[Dict[str, np.ndarray]]) -> dict:
+    """How the mid-price moves from trade to trade (D44): of the trades, the share after which the
+    mid-price has changed; of those changes, the share of half a tick (one side of the spread moving),
+    the share followed by a change the other way, and the share exactly undone by the next change
+    (flicker: e.g. the best level empties and refills), with the median number of trades between a
+    change and the next one, for all changes and for undone ones. Within segments only."""
+    n_trades = n_moves = half = reversed_ = undone = 0
+    gaps_all, gaps_undone = [], []
+    for seg in segments:
+        m = np.asarray(seg["mid"], dtype=float)
+        d = np.diff(m)
+        ok = np.isfinite(d)
+        n_trades += int(ok.sum())
+        idx = np.flatnonzero(ok & (d != 0))
+        moves = d[idx]
+        n_moves += len(moves)
+        half += int(np.sum(np.isclose(np.abs(moves), 0.5)))
+        if len(moves) > 1:
+            back = np.sign(moves[1:]) == -np.sign(moves[:-1])
+            exact = np.isclose(moves[1:], -moves[:-1])
+            gaps = idx[1:] - idx[:-1]
+            reversed_ += int(back.sum())
+            undone += int(exact.sum())
+            gaps_all.append(gaps)
+            gaps_undone.append(gaps[exact])
+    pairs = max(n_moves - len(segments), 1)
+    all_gaps = np.concatenate(gaps_all) if gaps_all else np.empty(0)
+    undone_gaps = np.concatenate(gaps_undone) if gaps_undone else np.empty(0)
+    return {"share_of_trades": n_moves / n_trades if n_trades else float("nan"),
+            "half_tick": half / n_moves if n_moves else float("nan"),
+            "reversed": reversed_ / pairs, "undone": undone / pairs,
+            "gap_median": float(np.median(all_gaps)) if len(all_gaps) else float("nan"),
+            "gap_median_undone": float(np.median(undone_gaps)) if len(undone_gaps) else float("nan")}
+
+
 def response_function(segments: Sequence[Dict[str, np.ndarray]], lags=SIGN_LAGS) -> np.ndarray:
     """R(l) = <(m_(n+l) - m_n) * s_n>: how far the mid-price has moved, on average, l trades after a
     trade, in the direction of that trade, in ticks (Bouchaud, Gefen, Potters and Wyart 2004, Eq. 3).
@@ -204,6 +239,7 @@ def stylised_facts(segments: Sequence[Dict[str, np.ndarray]]) -> dict:
         out["signs"]["orders"] = {"autocorr": ac, "gamma": power_law_exponent(SIGN_LAGS, ac),
                                   "fills_per_order": float(len(signs) / n_orders) if n_orders else float("nan")}
     out["response"] = {"lags": SIGN_LAGS, "per_trade": response_function(segments)}
+    out["mid_moves"] = mid_move_stats(segments)
     if all("time" in s for s in segments):              # real data: also per order, fills merged
         out["response"]["per_order"] = response_function([as_orders(s) for s in segments])
     return out
@@ -238,6 +274,12 @@ def summary_rows(facts: dict) -> List[tuple]:
             rows.append((f"autocorr. of trade signs, lag {lag}", f"{g['autocorr'][lags.index(lag)]:+.3f}"))
         rows += [(f"power-law exponent of sign autocorr. ({SIGN_FIT[0]}-{SIGN_FIT[1]} trades)", f"{g['gamma']:.2f}"),
                  ("trades whose side cannot be told (at the mid)", f"{g['share_unknown']:.1%}")]
+        if "mid_moves" in facts:
+            mm = facts["mid_moves"]
+            rows += [("mid-price changes: half a tick", f"{mm['half_tick']:.0%}"),
+                     ("mid-price changes: next change the other way", f"{mm['reversed']:.0%}"),
+                     ("mid-price changes: exactly undone by the next", f"{mm['undone']:.0%}"),
+                     ("trades between changes (median: all / undone)", f"{mm['gap_median']:g} / {mm['gap_median_undone']:g}")]
         if "response" in facts:
             rows += response_rows(facts["response"]["per_trade"], "response R(l), ticks")
             if "per_order" in facts["response"]:

@@ -308,3 +308,76 @@ stays unique.
     it is back at 0.5 only by about 1,000 trades against about 100, before overshooting as before.
     The E-mini's price reverts a little and briefly; the model's reverts a lot and for long, then
     trends.
+
+**D44. The response function: impact builds up and levels off in the E-mini, not in the model. [Assumed, Checked]**
+- **Why.** Order splitting gives the E-mini's sign persistence (D42), but the model's price still
+  reverts too much at about 100 trades and trends at longer lags (D42, D43). Bouchaud, Gefen, Potters
+  and Wyart (2004) write the price as the sum of the impacts of past trades, each fading with time as
+  lag^(−β); with signs correlated as lag^(−γ), the price is a random walk only if β = (1 − γ)/2 (their
+  Eq. 23). A faster fade gives H below 1/2 (reversion), a slower one H above 1/2 (trending). With
+  γ ≈ 0.65 for the E-mini this needs β ≈ 0.17. Their measure of this balance is the response function.
+- **Statistic** (`analysis/stylised.py`, `response_function`; the same code for both, D37):
+  R(ℓ) = ⟨(m_(n+ℓ) − m_n)·s_n⟩, the average move of the mid-price ℓ trades after a trade, in that
+  trade's direction, in ticks (their Eq. 3). m_n is the mid-price just before trade n (D43) and s_n
+  its sign (D41). For the E-mini also per order, with the fills of one order counted once, as the
+  paper groups simultaneous trades. In the paper's data (France Telecom) R roughly doubles from
+  ℓ = 1 to a peak near 1,000 trades and then falls back a little. They note that with random order
+  flow each trade's impact becomes permanent.
+- **Measured** (model: two runs of 50,000 steps each, the first 5,000 left out, N_A = 500; E-mini per
+  order; figure `results/response/response.png`, curves in `results/response/model_response.pkl`):
+
+  | R(ℓ), ticks | ℓ = 1 | 10 | 100 | 1,000 | 10,000 |
+  |---|---|---|---|---|---|
+  | E-mini (per order) | 0.059 | 0.272 | 0.350 | 0.424 | 0.590 |
+  | fixed depth, λ₀ = 100 | 0.701 | 0.418 | 0.199 | 0.256 | 0.872 |
+  | fixed depth, λ₀ = 7 | 0.023 | 0.028 | 0.012 | 0.017 | 0.056 |
+  | splitting (α 1.6, N 1, f 0.85), λ₀ = 100 | 0.532 | 0.797 | 0.403 | 1.071 | 1.759 |
+  | splitting (α 1.6, N 1, f 0.85), λ₀ = 7 | 0.017 | 0.053 | 0.054 | 0.102 | 0.144 |
+
+  The model's long lags rest on two short runs and are noisy.
+- **The E-mini:** the impact builds up over the first 100 or so orders (0.06 to 0.35 ticks) and then
+  stays almost level (0.42 at 1,000; about 0.6 at 10,000, noisy). The persistent orders keep pushing,
+  the providers keep absorbing, and neither wins: the balance of Bouchaud et al.
+- **The model:**
+  - Fixed depth, without splitting: each trade's impact fades until about 100–300 trades (the
+    book's reversion), then rises again at long lags.
+  - Splitting at λ₀ = 7: up to about 200 trades the shape is almost the E-mini's (it builds up and
+    levels off), but beyond that it keeps rising, to about 3 times its value at 100 by 10,000
+    trades, against under 2 for the E-mini.
+  - Splitting at λ₀ = 100: it rises to about 10 trades, falls back by 100 (the book's reversion),
+    then rises about five-fold.
+  - The size at λ₀ = 7 is about 0.05 ticks against the E-mini's 0.35, although the model's mid-price
+    moves more often (6–8% of trades against 2.35%, D43).
+- **Two separate problems:**
+  1. **Long lags (beyond about 200 trades): the impact keeps growing.** Nothing in the model absorbs
+     the splitters' persistence over the long run, so the price trends: the overshoot of H. **[Open]**
+  2. **The dip in H at λ₀ = 7 is not the impact fading.** R is level from 20 to 200 trades while H
+     dips to 0.2–0.36 there (D43), so the reversion must come from mid-price moves unrelated to the
+     direction of trades. A likely source is flicker: the best level empties, the mid-price moves half
+     a tick, and moves back when the level refills (the separate noise term in Bouchaud et al.'s
+     Eq. 12). That would also explain a small R with frequent mid-price moves. At λ₀ = 100 the dip is
+     the impact fading. Checked below; the reading needs restating.
+- **Check: how the mid-price moves** (`mid_move_stats`, the same code for both; model one run of 50,000
+  steps, the first 5,000 left out; 25 November 2026). Of the mid-price changes from one trade to the
+  next:
+
+  | | changes (share of trades) | half a tick | next change the other way | exactly undone by the next | trades between changes (median: all / undone) |
+  |---|---|---|---|---|---|
+  | E-mini | 2.35% | 16% | 71% | 58% | 23 / 14 |
+  | splitting (α 1.6, N 1, f 0.85), λ₀ = 7 | 6.0% | 97% | 71% | 66% | 7 / 7 |
+  | fixed depth, λ₀ = 7 | 8.5% | 96% | 74% | 67% | 7 / 7 |
+  | splitting, λ₀ = 100 | 55% | 45% | 40% | 10% | 1 / 1 |
+  | fixed depth, λ₀ = 100 | 65% | 40% | 50% | 11% | 1 / 1 |
+
+  A random walk would have the next change the other way half the time.
+  - **The E-mini reverses as often as the model at λ₀ = 7** (71% against 71–74%; exactly undone 58%
+    against 66–67%), so "too much flicker", counted this way, is wrong.
+  - **The kind of move differs.** 84% of the E-mini's changes are a whole tick: with the spread at one
+    tick 99% of the time, the bid and the ask shift together and the price steps to a new level (and
+    often back). 96–97% of the model's are half a tick: one side empties, the spread opens to two
+    ticks and closes again (the spread is at one tick only 36–44% of the time at λ₀ = 7, D40).
+  - **Restated reading (not tested):** the model has too little lasting impact for its back-and-forth.
+    The E-mini's impact levels off at about 0.35 ticks per order; the model's at about 0.05 ticks,
+    against frequent half-tick flicker, so the flicker dominates the variance until about 1,000
+    trades, where the model's H returns to 0.5 (about 100 for the E-mini). This links problem 2 to
+    how the model's spread opens and closes instead of the whole quote moving. **[Open]**

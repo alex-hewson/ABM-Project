@@ -6,7 +6,7 @@ Run with: python -m tests.test_stylised   (from the project root)
 import numpy as np
 
 from analysis.stylised import (LAGS, KURTOSIS_LAGS, SIGN_LAGS, as_orders, changes, order_signs, power_law_exponent, sign_autocorrelation,
-                               response_function, stylised_facts, trade_signs)
+                               mid_move_stats, response_function, stylised_facts, trade_signs)
 
 
 def check(label, condition):
@@ -134,6 +134,19 @@ def test_response_function():
     facts = stylised_facts([signed_segment(signs)])
     check("stylised_facts keeps the response per trade, and per order only with timestamps",
           "per_trade" in facts["response"] and "per_order" not in facts["response"])
+
+
+def test_mid_move_stats():
+    zigzag = {"mid": np.array([0, 0, 0.5, 0.5] * 2000, dtype=float)}
+    z = mid_move_stats([zigzag])
+    check("a flickering mid-price: every change half a tick and undone by the next",
+          z["half_tick"] == 1 and z["undone"] == 1 and z["reversed"] == 1)
+    check("changes after every second trade", abs(z["share_of_trades"] - 0.5) < 0.01 and z["gap_median"] == 2)
+    rng = np.random.default_rng(6)
+    walk = {"mid": np.cumsum(rng.choice([-1.0, 1.0], 100_000))}
+    w = mid_move_stats([walk])
+    check(f"a random walk: about half the changes go the other way next ({w['reversed']:.3f})", abs(w["reversed"] - 0.5) < 0.01)
+    check("whole-tick steps are not half-tick", w["half_tick"] == 0)
 
 
 if __name__ == "__main__":
